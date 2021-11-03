@@ -154,7 +154,7 @@ jobs:
       with:
         name: OpenWRT-${{ env.latest_release }}
         allowUpdates: true
-        tag: ${{ env.latest_release }}
+        tag: R2S-$(date +%Y-%m-%d)-${{ env.latest_release }}
         commit: master
         replacesArtifacts: true
         token: ${{ secrets.GITHUB_TOKEN }}
