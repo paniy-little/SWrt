@@ -81,6 +81,8 @@ jobs:
         echo "TARGET_DEVICE_ARCH=${TARGET_DEVICE_ARCH}-" >>$GITHUB_ENV
         latest_release="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][0-9]/p' | sed -n 1p | sed 's/.tar.gz//g' | sed 's/v//g')"
         echo "latest_release=${latest_release}" >>$GITHUB_ENV
+        latest_time="$(date +%Y-%m-%d)"
+        echo "latest_time=${latest_time}" >>$GITHUB_ENV
     - name: Cache
       uses: klever1988/cachewrtbuild@test
       with:
@@ -123,9 +125,9 @@ jobs:
         #./pishrink.sh -z $(ls *ext4.img)
         gzip --best *.img
         ls -Ahl
-        sha256sum openwrt*r2s* | tee R2S-$(date +%Y-%m-%d)-${{ env.latest_release }}.sha256sum
-        zip R2S-$(date +%Y-%m-%d)-${{ env.latest_release }}-ext4.zip *r2s*ext4*
-        zip R2S-$(date +%Y-%m-%d)-${{ env.latest_release }}-sfs.zip *r2s*squashfs*
+        sha256sum openwrt*r2s* | tee R2S-${{ env.latest_time }}-${{ env.latest_release }}.sha256sum
+        zip R2S-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *r2s*ext4*
+        zip R2S-${{ env.latest_time }}-${{ env.latest_release }}-sfs.zip *r2s*squashfs*
         mkdir -p ./ext4
         mkdir -p ./sfs
         mkdir -p ./sha
@@ -154,7 +156,7 @@ jobs:
       with:
         name: OpenWRT-${{ env.latest_release }}
         allowUpdates: true
-        tag: R2S-$(date +%Y-%m-%d)-${{ env.latest_release }}
+        tag: R2S-${{ env.latest_time }}-${{ env.latest_release }}
         commit: master
         replacesArtifacts: true
         token: ${{ secrets.GITHUB_TOKEN }}
