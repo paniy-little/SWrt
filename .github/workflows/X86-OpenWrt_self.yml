@@ -123,7 +123,7 @@ jobs:
         name: OpenWRT-${{ env.latest_release }}
         allowUpdates: true
         prerelease: true
-        tag: X86-${{ env.latest_time }}-${{ env.latest_release }}
+        tag: X86-${{ env.latest_release }}
         commit: 22.03
         replacesArtifacts: true
         token: ${{ secrets.GITHUB_TOKEN }}
