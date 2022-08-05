@@ -177,9 +177,9 @@ svn export https://github.com/QiuSimons/OpenWrt-Add/trunk/luci-app-control-webur
 # svn export https://github.com/coolsnowwolf/luci/trunk/applications/luci-app-adbyby-plus package/lean/luci-app-adbyby-plus
 # svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/adbyby package/lean/adbyby
 # 广告过滤 AdGuard
-svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-adguardhome package/new/luci-app-adguardhome
+#svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-adguardhome package/new/luci-app-adguardhome
 rm -rf ./feeds/packages/net/adguardhome
-svn export https://github.com/kenzok8/openwrt-packages/trunk/adguardhome feeds/packages/net/adguardhome
+svn export https://github.com/openwrt/packages/trunk/net/adguardhome feeds/packages/net/adguardhome
 #sed -i '/\t)/aifeq ($(CONFIG_ADGUARDHOME_COMPRESS_UPX),y)\n\t$(STAGING_DIR_HOST)/bin/upx --lzma --best $(GO_PKG_BUILD_BIN_DIR)/AdGuardHome\nendif' ./feeds/packages/net/adguardhome/Makefile
 #sed -i '/init/d' feeds/packages/net/adguardhome/Makefile
 # Argon 主题
