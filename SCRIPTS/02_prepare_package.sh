@@ -179,8 +179,8 @@ svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/adbyby packag
 # 广告过滤 AdGuard
 #svn export https://github.com/Lienol/openwrt/trunk/package/diy/luci-app-adguardhome package/new/luci-app-adguardhome
 #git clone https://github.com/rufengsuixing/luci-app-adguardhome.git package/new/luci-app-adguardhome
-rm -rf ./feeds/packages/net/adguardhome
-svn export https://github.com/openwrt/packages/trunk/net/adguardhome feeds/packages/net/adguardhome
+#rm -rf ./feeds/packages/net/adguardhome
+#svn export https://github.com/openwrt/packages/trunk/net/adguardhome feeds/packages/net/adguardhome
 #sed -i '/\t)/a\\t$(STAGING_DIR_HOST)/bin/upx --lzma --best $(GO_PKG_BUILD_BIN_DIR)/AdGuardHome' ./feeds/packages/net/adguardhome/Makefile
 #sed -i '/init/d' feeds/packages/net/adguardhome/Makefile
 # Argon 主题
