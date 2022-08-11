@@ -116,6 +116,11 @@ jobs:
         #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *x86-64-generic*
         #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-sfs.zip *squashfs-combined*
         ls -Ahl
+    - name: Upload artifact
+      uses: actions/upload-artifact@main
+      with:
+        name: OpenWRT_${{ env.latest_release }}
+        path: ./artifact/
 
     - name: Create release
       id: create_release

@@ -25,7 +25,8 @@ echo "net.netfilter.nf_conntrack_helper = 1" >>./package/kernel/linux/files/sysc
 
 
 ### 必要的 Patches ###
-
+# offload bugfix （this should be removed after upstream merged
+wget -qO - https://github.com/openwrt/openwrt/pull/10422.patch | patch -p1
 # introduce "le9" Linux kernel patches
 cp -f ../PATCH/backport/995-le9i.patch ./target/linux/generic/hack-5.10/995-le9i.patch
 cp -f ../PATCH/backport/290-remove-kconfig-CONFIG_I8K.patch ./target/linux/generic/hack-5.10/290-remove-kconfig-CONFIG_I8K.patch
@@ -73,6 +74,7 @@ popd
 # FW4
 rm -rf ./package/network/config/firewall4
 svn export https://github.com/immortalwrt/immortalwrt/branches/master/package/network/config/firewall4 package/network/config/firewall4
+cp -f ../PATCH/firewall/990-unconditionally-allow-ct-status-dnat.patch ./package/network/config/firewall4/patches/990-unconditionally-allow-ct-status-dnat.patch
 #mkdir package/network/config/firewall4/patches
 #wget 'https://git.openwrt.org/?p=project/firewall4.git;a=patch;h=38423fae' -O package/network/config/firewall4/patches/990-unconditionally-allow-ct-status-dnat.patch
 #wget -P package/network/config/firewall4/patches/ https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch
@@ -103,7 +105,8 @@ svn export https://github.com/Lienol/openwrt/trunk/package/network/fullconenat p
 # 更换为 ImmortalWrt Uboot 以及 Target
 rm -rf ./target/linux/rockchip
 svn export https://github.com/coolsnowwolf/lede/trunk/target/linux/rockchip target/linux/rockchip
-wget -qO - https://github.com/immortalwrt/immortalwrt/commit/af93561.patch | patch -p1
+#rm -rf ./target/linux/rockchip/image/armv8.mk
+#wget -P target/linux/rockchip/image/ https://github.com/coolsnowwolf/lede/raw/3211a97/target/linux/rockchip/image/armv8.mk
 rm -rf ./target/linux/rockchip/Makefile
 wget -P target/linux/rockchip/ https://github.com/openwrt/openwrt/raw/openwrt-22.03/target/linux/rockchip/Makefile
 rm -rf ./target/linux/rockchip/patches-5.10/002-net-usb-r8152-add-LED-configuration-from-OF.patch
@@ -159,6 +162,10 @@ git clone -b master --depth 1 https://github.com/BROBIRD/openwrt-r8168.git packa
 patch -p1 <../PATCH/r8168/r8168-fix_LAN_led-for_r4s-from_TL.patch
 # R8152驱动
 svn export https://github.com/immortalwrt/immortalwrt/branches/master/package/kernel/r8152 package/new/r8152
+# r8125驱动
+svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/r8125 package/new/r8125
+# igb-intel驱动
+svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/igb-intel package/new/igb-intel
 #sed -i 's,kmod-usb-net-rtl8152,kmod-usb-net-rtl8152-vendor,g' target/linux/rockchip/image/armv8.mk
 # UPX 可执行软件压缩
 sed -i '/patchelf pkgconf/i\tools-y += ucl upx' ./tools/Makefile
@@ -199,15 +206,15 @@ svn export https://github.com/coolsnowwolf/luci/trunk/applications/luci-app-auto
 # Boost 通用即插即用
 svn export https://github.com/QiuSimons/slim-wrt/branches/main/slimapps/application/luci-app-boostupnp package/new/luci-app-boostupnp
 rm -rf ./feeds/packages/net/miniupnpd
-svn export https://github.com/x-wrt/packages/trunk/net/miniupnpd feeds/packages/net/miniupnpd
-#git clone -b main --depth 1 https://github.com/msylgj/miniupnpd.git feeds/packages/net/miniupnpd
+#svn export https://github.com/x-wrt/packages/trunk/net/miniupnpd feeds/packages/net/miniupnpd
+git clone -b main --depth 1 https://github.com/msylgj/miniupnpd.git feeds/packages/net/miniupnpd
 pushd feeds/packages
 wget -qO - https://github.com/openwrt/packages/commit/785bbcb.patch | patch -p1
-wget -qO - https://github.com/x-wrt/packages/commit/40163cf.patch | patch -Rp1
+#wget -qO - https://github.com/x-wrt/packages/commit/40163cf.patch | patch -Rp1
 popd
 rm -rf ./feeds/luci/applications/luci-app-upnp
-svn export https://github.com/x-wrt/luci/trunk/applications/luci-app-upnp feeds/luci/applications/luci-app-upnp
-#git clone -b main --depth 1 https://github.com/msylgj/luci-app-upnp feeds/luci/applications/luci-app-upnp
+#svn export https://github.com/x-wrt/luci/trunk/applications/luci-app-upnp feeds/luci/applications/luci-app-upnp
+git clone -b main --depth 1 https://github.com/msylgj/luci-app-upnp feeds/luci/applications/luci-app-upnp
 #svn export https://github.com/kode54/luci/branches/upnp-nftables/applications/luci-app-upnp feeds/luci/applications/luci-app-upnp
 #svn export https://github.com/coolsnowwolf/packages/trunk/net/miniupnpd feeds/packages/net/miniupnpd
 # ChinaDNS
@@ -384,6 +391,7 @@ svn export https://github.com/fw876/helloworld/trunk/xray-core package/lean/xray
 svn export https://github.com/fw876/helloworld/trunk/v2ray-plugin package/lean/v2ray-plugin
 svn export https://github.com/fw876/helloworld/trunk/xray-plugin package/lean/xray-plugin
 svn export https://github.com/fw876/helloworld/trunk/shadowsocks-rust package/lean/shadowsocks-rust
+svn export https://github.com/fw876/helloworld/trunk/lua-neturl package/lean/lua-neturl
 rm -rf ./feeds/packages/net/kcptun
 svn export https://github.com/immortalwrt/packages/trunk/net/kcptun feeds/packages/net/kcptun
 ln -sf ../../../feeds/packages/net/kcptun ./package/feeds/packages/kcptun
