@@ -73,8 +73,9 @@ jobs:
         latest_time="$(date +%Y-%m-%d)"
         echo "latest_time=${latest_time}" >>$GITHUB_ENV
     - name: Cache
-      uses: HiGarfield/cachewrtbuild@test
+      uses: HiGarfield/cachewrtbuild@main
       with:
+        ccache: true
         mixkey: ${{ env.TARGET_DEVICE_ARCH }}
         prefix: ${{ github.workspace }}/openwrt
     - name: Make Download
