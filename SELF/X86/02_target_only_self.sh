@@ -11,10 +11,6 @@ CONFIG_CRYPTO_AES_NI_INTEL=y
 #CONFIG_UKSM=y
 #' >>./target/linux/x86/64/config-5.4
 
-# 交换 LAN/WAN 口
-sed -i 's,"eth0" "eth1","eth1" "eth0",g' /target/linux/x86/64/base-files/etc/board.d/02_network
-sed -i "s,'eth0' 'eth1','eth1' 'eth0',g" /target/linux/x86/64/base-files/etc/board.d/02_network
-
 #Vermagic
 latest_version="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][0-9]/p' | sed -n 1p | sed 's/v//g' | sed 's/.tar.gz//g')"
 wget https://downloads.openwrt.org/releases/${latest_version}/targets/x86/64/packages/Packages.gz

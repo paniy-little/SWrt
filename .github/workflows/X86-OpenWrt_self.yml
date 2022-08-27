@@ -129,7 +129,7 @@ jobs:
       with:
         name: OpenWRT-${{ env.latest_release }}
         allowUpdates: true
-        prerelease: true
+        prerelease: false
         tag: X86-${{ env.latest_release }}
         commit: 22.03
         replacesArtifacts: true
