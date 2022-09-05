@@ -25,9 +25,6 @@ echo "net.netfilter.nf_conntrack_helper = 1" >>./package/kernel/linux/files/sysc
 
 
 ### 必要的 Patches ###
-# some fix （this should be removed after next release
-wget -qO - https://github.com/openwrt/openwrt/commit/6c901ec.patch | patch -p1
-wget -qO - https://github.com/openwrt/openwrt/commit/0855549.patch | patch -p1
 # introduce "le9" Linux kernel patches
 cp -f ../PATCH/backport/995-le9i.patch ./target/linux/generic/hack-5.10/995-le9i.patch
 cp -f ../PATCH/backport/290-remove-kconfig-CONFIG_I8K.patch ./target/linux/generic/hack-5.10/290-remove-kconfig-CONFIG_I8K.patch
@@ -69,7 +66,7 @@ wget -qO - https://github.com/coolsnowwolf/lede/commit/8a4db76.patch | patch -p1
 ### Fullcone-NAT 部分 ###
 # Patch Kernel 以解决 FullCone 冲突
 pushd target/linux/generic/hack-5.10
-wget https://github.com/coolsnowwolf/lede/raw/80ea9d5/target/linux/generic/hack-5.10/952-net-conntrack-events-support-multiple-registrant.patch
+wget https://github.com/coolsnowwolf/lede/raw/master/target/linux/generic/hack-5.10/952-net-conntrack-events-support-multiple-registrant.patch
 popd
 # Patch FireWall 以增添 FullCone 功能
 # FW4
