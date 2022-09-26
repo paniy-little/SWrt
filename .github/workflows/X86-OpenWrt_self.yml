@@ -134,3 +134,4 @@ jobs:
         replacesArtifacts: true
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ./artifact/*.zip
+        updateOnlyUnreleased: false

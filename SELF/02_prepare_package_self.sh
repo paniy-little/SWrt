@@ -91,7 +91,7 @@ svn export https://github.com/wongsyrone/lede-1/trunk/package/libs/libnftnl pack
 rm -rf ./package/network/utils/nftables
 svn export https://github.com/wongsyrone/lede-1/trunk/package/network/utils/nftables package/network/utils/nftables
 # FW3
-mkdir package/network/config/firewall/patches
+mkdir -p package/network/config/firewall/patches
 wget -P package/network/config/firewall/patches/ https://github.com/immortalwrt/immortalwrt/raw/openwrt-21.02/package/network/config/firewall/patches/100-fullconenat.patch
 wget -qO- https://github.com/msylgj/R2S-R4S-OpenWrt/raw/master/PATCHES/001-fix-firewall3-flock.patch | patch -p1
 # Patch LuCI 以增添 FullCone 开关
@@ -116,6 +116,7 @@ wget -P target/linux/rockchip/ https://github.com/openwrt/openwrt/raw/openwrt-22
 rm -rf ./target/linux/rockchip/patches-5.10/002-net-usb-r8152-add-LED-configuration-from-OF.patch
 rm -rf ./target/linux/rockchip/patches-5.10/003-dt-bindings-net-add-RTL8152-binding-documentation.patch
 
+mkdir -p target/linux/rockchip/files-5.10/arch/arm64/boot/dts/rockchip
 cp -rf ../PATCH/dts/* ./target/linux/rockchip/files-5.10/arch/arm64/boot/dts/rockchip/
 
 rm -rf ./package/boot/uboot-rockchip
@@ -266,8 +267,7 @@ ln -sf ../../../feeds/luci/applications/luci-app-aliddns ./package/feeds/luci/lu
 # svn export https://github.com/lisaac/luci-app-dockerman/trunk/applications/luci-app-dockerman feeds/luci/applications/luci-app-dockerman
 # sed -i '/auto_start/d' feeds/luci/applications/luci-app-dockerman/root/etc/uci-defaults/luci-app-dockerman
 # pushd feeds/packages
-# wget -qO- https://github.com/openwrt/packages/commit/ed7396a.patch | patch -p1
-# wget -qO- https://github.com/openwrt/packages/commit/a27e8df.patch | patch -p1
+# wget -qO- https://github.com/openwrt/packages/commit/33ed553.patch | patch -p1
 # popd
 # rm -rf ./feeds/luci/collections/luci-lib-docker
 # svn export https://github.com/lisaac/luci-lib-docker/trunk/collections/luci-lib-docker feeds/luci/collections/luci-lib-docker
@@ -500,6 +500,8 @@ ln -sf ../../../feeds/luci/applications/luci-app-zerotier ./package/feeds/luci/l
 rm -rf ./feeds/packages/net/zerotier
 svn export https://github.com/immortalwrt/packages/branches/master/net/zerotier feeds/packages/net/zerotier
 #sed -i '/Default,one/a\\t$(STAGING_DIR_HOST)/bin/upx --lzma --best $(PKG_BUILD_DIR)/zerotier-one' feeds/packages/net/zerotier/Makefile
+#jq
+sed -i 's,9625784cf2e4fd9842f1d407681ce4878b5b0dcddbcd31c6135114a30c71e6a8,skip,g' feeds/packages/utils/jq/Makefile
 # 翻译及部分功能优化
 svn export https://github.com/QiuSimons/OpenWrt-Add/trunk/addition-trans-zh package/lean/lean-translate
 sed -i 's,iptables-mod-fullconenat,iptables-nft +kmod-nft-fullcone,g' package/lean/lean-translate/Makefile
@@ -550,7 +552,7 @@ rm -rf ./target/linux/rockchip/patches-5.4/601-net-phy-Add-driver-for-Motorcomm-
 
 ### 最后的收尾工作 ###
 # Lets Fuck
-mkdir package/base-files/files/usr/bin
+mkdir -p package/base-files/files/usr/bin
 wget -P package/base-files/files/usr/bin/ https://github.com/QiuSimons/OpenWrt-Add/raw/master/fuck
 #wget -P package/base-files/files/usr/bin/ https://github.com/QiuSimons/OpenWrt-Add/raw/master/ss2v2ray
 # 最大连接数
