@@ -11,7 +11,7 @@ jobs:
   
   Cleanup-Old-Releases:
     runs-on: ubuntu-20.04
-    if: github.event.repository.owner.id == github.event.sender.id
+    #if: github.event.repository.owner.id == github.event.sender.id
     steps:  
     - name: Delete Older Releases
       uses: dev-drprasad/delete-older-releases@master
@@ -23,7 +23,7 @@ jobs:
 
   Cleanup-Old-Artifacts:
     runs-on: ubuntu-20.04
-    if: github.event.repository.owner.id == github.event.sender.id
+    #if: github.event.repository.owner.id == github.event.sender.id
     steps:
     - name: Cleanup Old Action Artifacts
       uses: heidi-pay/gha-delete-artifacts@main
@@ -36,7 +36,7 @@ jobs:
         
   Cleanup-Workflow-Logs:
     runs-on: ubuntu-20.04
-    if: github.event.repository.owner.id == github.event.sender.id
+    #if: github.event.repository.owner.id == github.event.sender.id
     steps:
       - name: Cleanup Workflow Logs
         uses: Mattraks/delete-workflow-runs@main
