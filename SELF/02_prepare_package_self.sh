@@ -119,6 +119,11 @@ rm -rf ./target/linux/rockchip/patches-5.10/002-net-usb-r8152-add-LED-configurat
 rm -rf ./target/linux/rockchip/patches-5.10/003-dt-bindings-net-add-RTL8152-binding-documentation.patch
 cp -rf ../PATCH/rockchip-5.10/* ./target/linux/rockchip/patches-5.10/
 
+rm -rf ./package/firmware/linux-firmware/intel.mk
+wget -P package/firmware/linux-firmware/ https://github.com/coolsnowwolf/lede/raw/master/package/firmware/linux-firmware/intel.mk
+rm -rf ./package/firmware/linux-firmware/Makefile
+wget -P package/firmware/linux-firmware/ https://github.com/coolsnowwolf/lede/raw/master/package/firmware/linux-firmware/Makefile
+
 mkdir -p target/linux/rockchip/files-5.10
 cp -rf ../PATCH/files-5.10 ./target/linux/rockchip/
 
@@ -140,10 +145,9 @@ echo '
 ' >>./target/linux/rockchip/armv8/config-5.10
 
 # Dnsmasq
-#git clone -b mine --depth 1 https://git.openwrt.org/openwrt/staging/ldir.git
+git clone -b mine --depth 1 https://git.openwrt.org/openwrt/staging/ldir.git
 rm -rf ./package/network/services/dnsmasq
-#cp -rf ./ldir/package/network/services/dnsmasq ./package/network/services/
-svn export https://github.com/openwrt/openwrt/trunk/package/network/services/dnsmasq package/network/services/dnsmasq
+cp -rf ./ldir/package/network/services/dnsmasq ./package/network/services/
 
 # LRNG
 cp -rf ../PATCH/LRNG/* ./target/linux/generic/hack-5.10/
@@ -193,7 +197,8 @@ svn export https://github.com/immortalwrt/immortalwrt/branches/master/package/ke
 svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/r8125 package/new/r8125
 # igb-intel驱动
 svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/igb-intel package/new/igb-intel
-#sed -i 's,kmod-usb-net-rtl8152,kmod-usb-net-rtl8152-vendor,g' target/linux/rockchip/image/armv8.mk
+# igc-backport
+cp -rf ../PATCH/igc-files-5.10 ./target/linux/x86/files-5.10
 # UPX 可执行软件压缩
 sed -i '/patchelf pkgconf/i\tools-y += ucl upx' ./tools/Makefile
 sed -i '\/autoconf\/compile :=/i\$(curdir)/upx/compile := $(curdir)/ucl/compile' ./tools/Makefile
@@ -230,6 +235,7 @@ svn export https://github.com/immortalwrt/luci/trunk/applications/luci-app-arpbi
 ln -sf ../../../feeds/luci/applications/luci-app-arpbind ./package/feeds/luci/luci-app-arpbind
 # 定时重启
 svn export https://github.com/coolsnowwolf/luci/trunk/applications/luci-app-autoreboot package/lean/luci-app-autoreboot
+sed -i '/LUCI_DEPENDS/d' package/lean/luci-app-autoreboot/Makefile
 # Boost 通用即插即用
 svn export https://github.com/QiuSimons/slim-wrt/branches/main/slimapps/application/luci-app-boostupnp package/new/luci-app-boostupnp
 rm -rf ./feeds/packages/net/miniupnpd
@@ -271,7 +277,7 @@ ln -sf ../../../feeds/luci/applications/luci-app-aliddns ./package/feeds/luci/lu
 # svn export https://github.com/lisaac/luci-app-dockerman/trunk/applications/luci-app-dockerman feeds/luci/applications/luci-app-dockerman
 # sed -i '/auto_start/d' feeds/luci/applications/luci-app-dockerman/root/etc/uci-defaults/luci-app-dockerman
 # pushd feeds/packages
-# wget -qO- https://github.com/openwrt/packages/commit/33ed553.patch | patch -p1
+# wget -qO- https://github.com/openwrt/packages/commit/52fd8d3.patch | patch -p1
 # popd
 # rm -rf ./feeds/luci/collections/luci-lib-docker
 # svn export https://github.com/lisaac/luci-lib-docker/trunk/collections/luci-lib-docker feeds/luci/collections/luci-lib-docker
@@ -358,10 +364,10 @@ svn export https://github.com/xiaorouji/openwrt-passwall/trunk/dns2socks package
 svn export https://github.com/xiaorouji/openwrt-passwall/trunk/ipt2socks package/new/ipt2socks
 svn export https://github.com/xiaorouji/openwrt-passwall/trunk/pdnsd-alt package/new/pdnsd
 svn export https://github.com/QiuSimons/OpenWrt-Add/trunk/trojan-plus package/new/trojan-plus
-svn export https://github.com/xiaorouji/openwrt-passwall/trunk/xray-core package/new/xray-core
-svn export https://github.com/xiaorouji/openwrt-passwall/trunk/xray-plugin package/new/xray-plugin
-svn export https://github.com/xiaorouji/openwrt-passwall/trunk/v2ray-geodata package/new/v2ray-geodata
-svn export https://github.com/xiaorouji/openwrt-passwall/trunk/dns2tcp package/new/dns2tcp
+svn export https://github.com/xiaorouji/openwrt-passwall//branches/packages/xray-core package/new/xray-core
+svn export https://github.com/xiaorouji/openwrt-passwall//branches/packages/xray-plugin package/new/xray-plugin
+svn export https://github.com/xiaorouji/openwrt-passwall//branches/packages/v2ray-geodata package/new/v2ray-geodata
+svn export https://github.com/xiaorouji/openwrt-passwall//branches/packages/dns2tcp package/new/dns2tcp
 # Passwall 白名单
 echo '
 checkip.synology.com
@@ -406,7 +412,7 @@ git clone -b master --depth 1 https://github.com/tty228/luci-app-serverchan.git 
 # # ShadowsocksR Plus+ 依赖
 rm -rf ./feeds/packages/net/shadowsocks-libev
 svn export https://github.com/coolsnowwolf/packages/trunk/net/shadowsocks-libev package/lean/shadowsocks-libev
-svn export https://github.com/coolsnowwolf/packages/trunk/net/redsocks2 package/lean/redsocks2
+svn export https://github.com/fw876/helloworld/trunk/redsocks2 package/lean/redsocks2
 svn export https://github.com/coolsnowwolf/lede/trunk/package/lean/srelay package/lean/srelay
 svn export https://github.com/fw876/helloworld/trunk/trojan package/lean/trojan
 svn export https://github.com/fw876/helloworld/trunk/tcping package/lean/tcping
@@ -535,11 +541,13 @@ echo -e " Paniy Build on "$(date +%Y.%m.%d)"\n ---------------------------------
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
 #启动后扩大rootfs
-rm -rf ./package/base-files/files/etc/rc.local
-wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/rc.local -O ./package/base-files/files/etc/rc.local
-wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/panyi-disk.sh -O ./package/base-files/files/etc/panyi-disk.sh && chmod +x ./package/base-files/files/etc/panyi-disk.sh
-wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/panyi-cf.sh -O ./package/base-files/files/etc/panyi-cf.sh && chmod +x ./package/base-files/files/etc/panyi-cf.sh
-sed -i '/\/etc\/passwd/a\/etc\/panyi-disk.sh\n\/etc\/panyi-cf.sh' ./package/base-files/Makefile
+##rm -rf ./package/base-files/files/etc/rc.local
+##wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/rc.local -O ./package/base-files/files/etc/rc.local
+#wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/panyi-disk.sh -O ./package/base-files/files/etc/panyi-disk.sh && chmod +x ./package/base-files/files/etc/panyi-disk.sh
+#wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/panyi-cf.sh -O ./package/base-files/files/etc/panyi-cf.sh && chmod +x ./package/base-files/files/etc/panyi-cf.sh
+wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/panyi-begin.sh -O ./package/base-files/files/etc/panyi-begin.sh && chmod +x ./package/base-files/files/etc/panyi-begin.sh
+#sed -i '/\/etc\/passwd/a\/etc\/panyi-disk.sh\n\/etc\/panyi-cf.sh' ./package/base-files/Makefile
+sed -i '/\/etc\/passwd/a\/etc\/panyi-begin.sh' ./package/base-files/Makefile
 #accesscontrol
 #svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-accesscontrol package/new/luci-app-accesscontrol
 #luci-app-eqos
