@@ -3,7 +3,7 @@ name: Cleaning
 on:
   workflow_dispatch:
   schedule:
-    - cron: 1 1 * * */3
+    - cron: 1 1 * * */1
   watch:
     types: started
 
