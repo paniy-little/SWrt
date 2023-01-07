@@ -146,10 +146,10 @@ echo '
 ' >>./target/linux/rockchip/armv8/config-5.10
 
 # Dnsmasq
-#git clone -b mine --depth 1 https://git.openwrt.org/openwrt/staging/ldir.git
-rm -rf ./package/network/services/dnsmasq
-#cp -rf ./ldir/package/network/services/dnsmasq ./package/network/services/
-svn export https://github.com/openwrt/openwrt/trunk/package/network/services/dnsmasq package/network/services/dnsmasq
+git clone -b mine --depth 1 https://git.openwrt.org/openwrt/staging/ldir.git
+#rm -rf ./package/network/services/dnsmasq
+cp -rf ./ldir/package/network/services/dnsmasq ./package/network/services/
+#svn export https://github.com/openwrt/openwrt/trunk/package/network/services/dnsmasq package/network/services/dnsmasq
 
 # LRNG
 cp -rf ../PATCH/LRNG/* ./target/linux/generic/hack-5.10/
@@ -248,7 +248,7 @@ wget -qO- https://github.com/openwrt/packages/commit/d811cb4.patch | patch -p1
 wget -qO- https://github.com/openwrt/packages/commit/9a2da85.patch | patch -p1
 wget -qO- https://github.com/openwrt/packages/commit/71dc090.patch | patch -p1
 popd
-sed -i '/firewall4.include/d' feeds/packages/net/miniupnpd/Makefile
+#sed -i '/firewall4.include/d' feeds/packages/net/miniupnpd/Makefile
 rm -rf ./feeds/luci/applications/luci-app-upnp
 #git clone -b main --depth 1 https://github.com/msylgj/luci-app-upnp feeds/luci/applications/luci-app-upnp
 svn export https://github.com/openwrt/luci/trunk/applications/luci-app-upnp feeds/luci/applications/luci-app-upnp
