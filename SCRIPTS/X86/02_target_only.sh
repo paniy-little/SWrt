@@ -1,15 +1,24 @@
 #!/bin/bash
 
-# 内核加解密组件
-echo '
-CONFIG_CRYPTO_AES_NI_INTEL=y
-' >>./target/linux/x86/config-5.10
+sed -i 's/O2 -Wl,--gc-sections/O2 -Wl,--gc-sections -mtune=goldmont-plus/g' include/target.mk
 
-# UKSM
-#echo '
-#CONFIG_KSM=y
-#CONFIG_UKSM=y
-#' >>./target/linux/x86/64/config-5.4
+rm -rf ./package/kernel/linux/modules/video.mk
+wget -P package/kernel/linux/modules/ https://github.com/coolsnowwolf/lede/raw/master/package/kernel/linux/modules/video.mk
+sed -i 's,CONFIG_DRM_I915_CAPTURE_ERROR ,CONFIG_DRM_I915_CAPTURE_ERROR=n ,g' package/kernel/linux/modules/video.mk
+
+echo '# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+
+grep "Default string" /tmp/sysinfo/model >> /dev/null
+if [ $? -ne 0 ];then
+    echo should be fine
+else
+    echo "Compatible PC" > /tmp/sysinfo/model
+fi
+
+exit 0
+'> ./package/base-files/files/etc/rc.local
+
 
 #Vermagic
 latest_version="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][0-9]/p' | sed -n 1p | sed 's/v//g' | sed 's/.tar.gz//g')"
