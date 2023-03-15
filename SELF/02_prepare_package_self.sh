@@ -457,10 +457,10 @@ echo -e " Yunshu Build on "$(date +%Y.%m.%d)"\n --------------------------------
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
 #启动后扩大rootfs
 ##rm -rf ./package/base-files/files/etc/rc.local
-##wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/rc.local -O ./package/base-files/files/etc/rc.local
-#wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/yunshu-disk.sh -O ./package/base-files/files/etc/yunshu-disk.sh && chmod +x ./package/base-files/files/etc/yunshu-disk.sh
-#wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/yunshu-cf.sh -O ./package/base-files/files/etc/yunshu-cf.sh && chmod +x ./package/base-files/files/etc/yunshu-cf.sh
-wget https://raw.githubusercontent.com/paniy/selfuse/master/openwrt/yunshu.sh -O ./package/base-files/files/etc/yunshu.sh && chmod +x ./package/base-files/files/etc/yunshu.sh
+##wget https://raw.githubusercontent.com/hello-yunshu/selfuse/master/openwrt/rc.local -O ./package/base-files/files/etc/rc.local
+#wget https://raw.githubusercontent.com/hello-yunshu/selfuse/master/openwrt/yunshu-disk.sh -O ./package/base-files/files/etc/yunshu-disk.sh && chmod +x ./package/base-files/files/etc/yunshu-disk.sh
+#wget https://raw.githubusercontent.com/hello-yunshu/selfuse/master/openwrt/yunshu-cf.sh -O ./package/base-files/files/etc/yunshu-cf.sh && chmod +x ./package/base-files/files/etc/yunshu-cf.sh
+wget https://raw.githubusercontent.com/hello-yunshu/selfuse/master/openwrt/yunshu.sh -O ./package/base-files/files/etc/yunshu.sh && chmod +x ./package/base-files/files/etc/yunshu.sh
 #sed -i '/\/etc\/passwd/a\/etc\/yunshu-disk.sh\n\/etc\/yunshu-cf.sh' ./package/base-files/Makefile
 sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 #accesscontrol
