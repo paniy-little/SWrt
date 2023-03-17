@@ -4,6 +4,7 @@ sed -i 's/O2 -Wl,--gc-sections/O2 -Wl,--gc-sections -mtune=goldmont-plus/g' incl
 
 rm -rf ./package/kernel/linux/modules/video.mk
 cp -rf ../lede/package/kernel/linux/modules/video.mk ./package/kernel/linux/modules/video.mk
+sed -i '/nouveau\.ko/d' package/kernel/linux/modules/video.mk
 sed -i 's,CONFIG_DRM_I915_CAPTURE_ERROR ,CONFIG_DRM_I915_CAPTURE_ERROR=n ,g' package/kernel/linux/modules/video.mk
 
 echo '# Put your custom commands here that should be executed once
@@ -14,12 +15,6 @@ if [ $? -ne 0 ];then
     echo should be fine
 else
     echo "Compatible PC" > /tmp/sysinfo/model
-fi
-
-board=$(cat /tmp/sysinfo/board_name | cut -d , -f2)
-if [[ ! -f /etc/panyi_${board} ]]; then
-    touch /etc/panyi_${board}
-    bash /etc/panyi-begin.sh
 fi
 
 exit 0
