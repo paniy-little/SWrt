@@ -445,19 +445,6 @@ sed -i 's,9625784cf2e4fd9842f1d407681ce4878b5b0dcddbcd31c6135114a30c71e6a8,skip,
 # 翻译及部分功能优化
 cp -rf ../OpenWrt-Add/addition-trans-zh ./package/new/addition-trans-zh
 sed -i 's,iptables-mod-fullconenat,iptables-nft +kmod-nft-fullcone,g' package/new/addition-trans-zh/Makefile
-# dae ready
-sed -i '/CONFIG_DEBUG_INFO is not set/d' target/linux/generic/config-5.10
-sed -i '/CONFIG_DEBUG_INFO_BTF/d' target/linux/generic/config-5.10
-sed -i '/CONFIG_NET_CLS_ACT/d' target/linux/generic/config-5.10
-sed -i '/CONFIG_NET_CLS_ACT/d' target/linux/generic/config-5.10
-echo '
-CONFIG_DEBUG_INFO=y
-CONFIG_DEBUG_INFO_BTF=y
-CONFIG_NET_CLS_ACT=y
-CONFIG_NET_SCH_INGRESS=m
-CONFIG_NET_INGRESS=y
-CONFIG_NET_EGRESS=y
-' >>./target/linux/generic/config-5.10
 
 #使用O2级别的优化
 #sed -i 's/Os/O2/g' include/target.mk
