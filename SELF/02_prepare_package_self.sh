@@ -370,7 +370,7 @@ cp -rf ../ssrp/lua-neturl ./package/new/lua-neturl
 rm -rf ./feeds/packages/net/kcptun
 cp -rf ../immortalwrt_pkg/net/kcptun ./feeds/packages/net/kcptun
 ln -sf ../../../feeds/packages/net/kcptun ./package/feeds/packages/kcptun
-# # ShadowsocksR Plus+
+# ShadowsocksR Plus+
 # cp -rf ../ssrp/luci-app-ssr-plus ./package/new/luci-app-ssr-plus
 # rm -rf ./package/new/luci-app-ssr-plus/po/zh_Hans
 # pushd package/new
