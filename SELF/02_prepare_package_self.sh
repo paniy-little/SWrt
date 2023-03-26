@@ -495,16 +495,14 @@ svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos packa
 #luci-app-pushbot
 #svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-pushbot package/new/luci-app-pushbot
 #阿里云webdav
-svn export https://github.com/kenzok8/openwrt-packages/trunk/aliyundrive-webdav package/new/aliyundrive-webdav
-svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-aliyundrive-webdav package/new/luci-app-aliyundrive-webdav
+# svn export https://github.com/kenzok8/openwrt-packages/trunk/aliyundrive-webdav package/new/aliyundrive-webdav
+# svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-aliyundrive-webdav package/new/luci-app-aliyundrive-webdav
 
 ### 最后的收尾工作 ###
 # Lets Fuck
 mkdir -p package/base-files/files/usr/bin
 cp -rf ../OpenWrt-Add/fuck ./package/base-files/files/usr/bin/fuck
 #wget -P package/base-files/files/usr/bin/ https://github.com/QiuSimons/OpenWrt-Add/raw/master/ss2v2ray
-# 最大连接数
-sed -i 's/16384/65535/g' package/kernel/linux/files/sysctl-nf-conntrack.conf
 # 生成默认配置及缓存
 rm -rf .config
 cat ../SEED/extra.cfg >> ./target/linux/generic/config-5.10
