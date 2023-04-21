@@ -285,15 +285,15 @@ cp -rf ../lede_luci/applications/luci-app-ipsec-server ./package/new/luci-app-ip
 # IPv6 兼容助手
 cp -rf ../lede/package/lean/ipv6-helper ./package/new/ipv6-helper
 # 京东签到 By Jerrykuku
-# git clone --depth 1 https://github.com/jerrykuku/node-request.git package/new/node-request
-# git clone --depth 1 https://github.com/jerrykuku/luci-app-jd-dailybonus.git package/new/luci-app-jd-dailybonus
+#git clone --depth 1 https://github.com/jerrykuku/node-request.git package/new/node-request
+#git clone --depth 1 https://github.com/jerrykuku/luci-app-jd-dailybonus.git package/new/luci-app-jd-dailybonus
 # MentoHUST
 git clone --depth 1 https://github.com/BoringCat/luci-app-mentohust package/new/luci-app-mentohust
 git clone --depth 1 https://github.com/KyleRicardo/MentoHUST-OpenWrt-ipk package/new/MentoHUST
 # Mosdns
-# cp -rf ../mosdns/mosdns ./package/new/mosdns
-# cp -rf ../mosdns/luci-app-mosdns ./package/new/luci-app-mosdns
-# cp -rf ../mosdns/v2ray-geodata ./package/new/v2ray-geodata
+cp -rf ../mosdns/mosdns ./package/new/mosdns
+cp -rf ../mosdns/luci-app-mosdns ./package/new/luci-app-mosdns
+cp -rf ../mosdns/v2ray-geodata ./package/new/v2ray-geodata
 # 流量监管
 cp -rf ../lede_luci/applications/luci-app-netdata ./package/new/luci-app-netdata
 # 上网 APP 过滤
@@ -456,18 +456,6 @@ echo -e " Yunshu Build on "$(date +%Y.%m.%d)"\n --------------------------------
 #svn export https://github.com/openwrt/openwrt/branches/master/package/libs/libjson-c package/libs/libjson-c
 #ariang
 #svn export https://github.com/openwrt/packages/trunk/net/ariang feeds/packages/net/ariang
-# Add luci-app-mwan3helper
-#svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-mwan3helper package/new/luci-app-mwan3helper
-# Add luci-app-onliner
-#git clone -b master --depth 1 https://github.com/rufengsuixing/luci-app-onliner.git package/new/luci-app-onliner
-# Add luci-app-syncdial
-#svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-syncdial package/new/luci-app-syncdial
-#filetransfer
-#svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-filetransfer package/new/luci-app-filetransfer
-#softethervpn
-#rm -rf ./feeds/package/libs/readline
-#svn export https://github.com/openwrt/packages/trunk/libs/readline package/libs/readline
-#svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-softethervpn package/new/luci-app-softethervpn
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
 #启动后扩大rootfs
@@ -489,6 +477,8 @@ svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos packa
 #阿里云webdav
 # svn export https://github.com/kenzok8/openwrt-packages/trunk/aliyundrive-webdav package/new/aliyundrive-webdav
 # svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-aliyundrive-webdav package/new/luci-app-aliyundrive-webdav
+#luci-app-cloudflarespeedtest
+svn export https://github.com/kenzok8/small-package/trunk/luci-app-cloudflarespeedtest package/new/luci-app-cloudflarespeedtest
 
 ### 最后的收尾工作 ###
 # Lets Fuck
