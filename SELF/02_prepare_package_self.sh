@@ -478,7 +478,7 @@ svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos packa
 # svn export https://github.com/kenzok8/openwrt-packages/trunk/aliyundrive-webdav package/new/aliyundrive-webdav
 # svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-aliyundrive-webdav package/new/luci-app-aliyundrive-webdav
 #luci-app-cloudflarespeedtest
-svn export https://github.com/kenzok8/small-package/trunk/luci-app-cloudflarespeedtest package/new/luci-app-cloudflarespeedtest
+#svn export https://github.com/kenzok8/small-package/trunk/luci-app-cloudflarespeedtest package/new/luci-app-cloudflarespeedtest
 
 ### 最后的收尾工作 ###
 # Lets Fuck
