@@ -345,7 +345,7 @@ cp -rf ../ssrp/shadowsocksr-libev ./package/new/shadowsocksr-libev
 cp -rf ../ssrp/simple-obfs ./package/new/simple-obfs
 cp -rf ../ssrp/naiveproxy ./package/new/naiveproxy
 cp -rf ../ssrp/v2ray-core ./package/new/v2ray-core
-cp -rf ../ssrp/hysteria ./package/new/hysteria
+cp -rf ../passwall_pkg/hysteria ./package/new/hysteria
 cp -rf ../ssrp/sagernet-core ./package/new/sagernet-core
 rm -rf ./feeds/packages/net/xray-core
 cp -rf ../ssrp/xray-core ./package/new/xray-core
