@@ -39,7 +39,10 @@ cp -rf ../PATCH/BBRv2/kernel/* ./target/linux/generic/hack-5.15/
 cp -rf ../PATCH/BBRv2/openwrt/package ./
 wget -qO - https://github.com/openwrt/openwrt/commit/7db9763.patch | patch -p1
 # LRNG
-cp -rf ../PATCH/LRNG/* ./target/linux/generic/hack-5.15/
+#cp -rf ../PATCH/LRNG/* ./target/linux/generic/hack-5.15/
+#echo '
+#CONFIG_LRNG=y
+#' >>./target/linux/generic/config-5.15
 # SSL
 rm -rf ./package/libs/mbedtls
 cp -rf ../immortalwrt/package/libs/mbedtls ./package/libs/mbedtls
@@ -48,7 +51,7 @@ cp -rf ../immortalwrt/package/libs/mbedtls ./package/libs/mbedtls
 # fstool
 wget -qO - https://github.com/coolsnowwolf/lede/commit/8a4db76.patch | patch -p1
 # wg
-wget -qO - https://raw.githubusercontent.com/gl-inet/gl-infra-builder/main/patches-23.05/2000-kernel-Add-hotplug-support-for-wireguard.patch | patch -p1
+cp -rf ../PATCH/wg/* ./target/linux/generic/hack-5.15/
 
 ### Fullcone-NAT 部分 ###
 # Patch Kernel 以解决 FullCone 冲突
@@ -83,29 +86,16 @@ cp -rf ../Lienol/package/network/utils/fullconenat ./package/new/fullconenat
 # 更换为 ImmortalWrt Uboot 以及 Target
 rm -rf ./target/linux/rockchip
 cp -rf ../immortalwrt_23/target/linux/rockchip ./target/linux/rockchip
-#rm -rf ./target/linux/rockchip/Makefile
-#cp -rf ../openwrt_release/target/linux/rockchip/Makefile ./target/linux/rockchip/Makefile
-#rm -rf ./target/linux/rockchip/armv8/config-5.15
-#cp -rf ../openwrt_release/target/linux/rockchip/armv8/config-5.15 ./target/linux/rockchip/armv8/config-5.15
-#rm -rf ./target/linux/rockchip/patches-5.15/*otorcomm*
-#rm -rf ./target/linux/rockchip/patches-5.15/*8152*
 cp -rf ../PATCH/rockchip-5.15/* ./target/linux/rockchip/patches-5.15/
 rm -rf ./package/boot/uboot-rockchip
 cp -rf ../immortalwrt_23/package/boot/uboot-rockchip ./package/boot/uboot-rockchip
 rm -rf ./package/boot/arm-trusted-firmware-rockchip
 cp -rf ../immortalwrt_23/package/boot/arm-trusted-firmware-rockchip ./package/boot/arm-trusted-firmware-rockchip
-#cp -rf ../lede/package/boot/arm-trusted-firmware-rockchip-vendor ./package/boot/arm-trusted-firmware-rockchip-vendor
-#video.mk
-rm -rf ./package/kernel/linux/modules/video.mk
-cp -rf ../lede/package/kernel/linux/modules/video.mk ./package/kernel/linux/modules/video.mk
-sed -i '/nouveau\.ko/d' package/kernel/linux/modules/video.mk
 #intel-firmware
-rm -rf ./package/firmware/linux-firmware/intel.mk
-cp -rf ../lede/package/firmware/linux-firmware/intel.mk ./package/firmware/linux-firmware/intel.mk
-rm -rf ./package/firmware/linux-firmware/Makefile
-cp -rf ../lede/package/firmware/linux-firmware/Makefile ./package/firmware/linux-firmware/Makefile
+wget -qO - https://github.com/openwrt/openwrt/commit/9c58add.patch | patch -p1
+wget -qO - https://github.com/openwrt/openwrt/commit/64f1a65.patch | patch -p1
 wget -qO - https://github.com/openwrt/openwrt/commit/c21a3570.patch | patch -p1
-cp -rf ../lede/target/linux/x86/64/config-5.15 ./target/linux/x86/64/config-5.15
+sed -i '/I915/d' target/linux/x86/64/config-5.15
 # Disable Mitigations
 sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/mmc.bootscript
 sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/nanopi-r2s.bootscript
@@ -131,7 +121,7 @@ wget -qO - https://github.com/immortalwrt/immortalwrt/commit/73e5679.patch | pat
 wget https://github.com/immortalwrt/immortalwrt/raw/openwrt-23.05/target/linux/generic/backport-5.15/051-v5.18-bpf-Add-config-to-allow-loading-modules-with-BTF-mismatch.patch -O target/linux/generic/backport-5.15/051-v5.18-bpf-Add-config-to-allow-loading-modules-with-BTF-mismatch.patch
 # mount cgroupv2
 pushd feeds/packages
-patch -p1 <../../../PATCH/cgroupfs-mount/0001-fix-cgroupfs-mount.patch | patch -p1
+patch -p1 <../../../PATCH/cgroupfs-mount/0001-fix-cgroupfs-mount.patch
 popd
 mkdir -p feeds/packages/utils/cgroupfs-mount/patches
 cp -rf ../PATCH/cgroupfs-mount/900-add-cgroupfs2.patch ./feeds/packages/utils/cgroupfs-mount/patches/
@@ -519,11 +509,13 @@ patch -p1 < ../PATCH/firewall/luci-app-firewall_add_sfe_switch.patch
 mkdir ./package/lean
 mkdir ./package/lean/shortcut-fe
 cp -rf ../lede/package/lean/shortcut-fe/fast-classifier ./package/lean/shortcut-fe/fast-classifier
+wget -qO - https://github.com/coolsnowwolf/lede/commit/331f04f.patch | patch -p1
+wget -qO - https://github.com/coolsnowwolf/lede/commit/232b8b4.patch | patch -p1
 cp -rf ../lede/package/lean/shortcut-fe/shortcut-fe ./package/lean/shortcut-fe/shortcut-fe
-cp -rf ../lede/package/lean/shortcut-fe/simulated-driver ./package/lean/shortcut-fe/simulated-driver
 wget -qO - https://github.com/coolsnowwolf/lede/commit/e517080.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/413cd91.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/eb70dad.patch | patch -p1
+cp -rf ../lede/package/lean/shortcut-fe/simulated-driver ./package/lean/shortcut-fe/simulated-driver
 
 #LTO/GC
 # Grub 2
