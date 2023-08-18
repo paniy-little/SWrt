@@ -62,6 +62,7 @@ cp -rf ../lede/target/linux/generic/hack-5.15/982-add-bcm-fullconenat-support.pa
 rm -rf ./package/network/config/firewall4
 cp -rf ../immortalwrt/package/network/config/firewall4 ./package/network/config/firewall4
 cp -f ../PATCH/firewall/990-unconditionally-allow-ct-status-dnat.patch ./package/network/config/firewall4/patches/990-unconditionally-allow-ct-status-dnat.patch
+cp -f ../PATCH/firewall/001-fix-fw4-flow-offload.patch ./package/network/config/firewall4/patches/001-fix-fw4-flow-offload.patch
 rm -rf ./package/libs/libnftnl
 cp -rf ../immortalwrt/package/libs/libnftnl ./package/libs/libnftnl
 rm -rf ./package/network/utils/nftables
@@ -98,8 +99,6 @@ wget -qO - https://github.com/openwrt/openwrt/commit/c21a3570.patch | patch -p1
 sed -i '/I915/d' target/linux/x86/64/config-5.15
 # Disable Mitigations
 sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/mmc.bootscript
-sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/nanopi-r2s.bootscript
-sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/nanopi-r4s.bootscript
 sed -i 's,noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-efi.cfg
 sed -i 's,noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-iso.cfg
 sed -i 's,noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-pc.cfg
@@ -182,8 +181,8 @@ sed -i '\/autoconf\/compile :=/i\$(curdir)/upx/compile := $(curdir)/ucl/compile'
 cp -rf ../Lienol/tools/ucl ./tools/ucl
 cp -rf ../Lienol/tools/upx ./tools/upx
 # 更换 golang 版本
-rm -rf ./feeds/packages/lang/golang
-cp -rf ../openwrt_pkg_ma/lang/golang ./feeds/packages/lang/golang
+#rm -rf ./feeds/packages/lang/golang
+#cp -rf ../openwrt_pkg_ma/lang/golang ./feeds/packages/lang/golang
 # 访问控制
 cp -rf ../lede_luci/applications/luci-app-accesscontrol ./package/new/luci-app-accesscontrol
 cp -rf ../OpenWrt-Add/luci-app-control-weburl ./package/new/luci-app-control-weburl
@@ -516,7 +515,7 @@ wget -qO - https://github.com/coolsnowwolf/lede/commit/ec795c9.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/789f805.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/6398168.patch | patch -p1
 cp -rf ../lede/package/lean/shortcut-fe/shortcut-fe ./package/lean/shortcut-fe/shortcut-fe
-wget -qO - https://github.com/coolsnowwolf/lede/commit/413cd91.patch | patch -p1
+wget -qO - https://github.com/coolsnowwolf/lede/commit/0e29809.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/eb70dad.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/7ba3ec0.patch | patch -p1
 cp -rf ../lede/package/lean/shortcut-fe/simulated-driver ./package/lean/shortcut-fe/simulated-driver
