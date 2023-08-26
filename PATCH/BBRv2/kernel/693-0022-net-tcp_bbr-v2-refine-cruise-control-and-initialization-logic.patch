@@ -4,8 +4,20 @@ Date: Tue, 15 Nov 2022 11:39:04 +0800
 Subject: net-tcp_bbr: v2: refine cruise control and initialization logic
 ---
  net/ipv4/tcp_bbr2.c   | 31 + 1 -
- 1 files changed, 31 insertions(+), 1 deletion(-)
+ include/net/inet_connection_sock.h   | +-
+ 2 files changed, 32 insertions(+), 2 deletion(-)
 
+--- a/include/net/inet_connection_sock.h
++++ b/include/net/inet_connection_sock.h
+@@ -135,7 +135,7 @@
+ 	u32			  icsk_user_timeout;
+ 
+ /* XXX inflated by temporary internal debugging info */
+-#define ICSK_CA_PRIV_SIZE      (216)
++#define ICSK_CA_PRIV_SIZE      (224)
+ 	u64			  icsk_ca_priv[ICSK_CA_PRIV_SIZE / sizeof(u64)];
+ };
+ 
 --- a/net/ipv4/tcp_bbr2.c
 +++ b/net/ipv4/tcp_bbr2.c
 @@ -132,11 +132,13 @@
