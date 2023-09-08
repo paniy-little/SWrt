@@ -27,7 +27,7 @@ lienol_repo="https://github.com/Lienol/openwrt.git"
 lienol_pkg_repo="https://github.com/Lienol/openwrt-package"
 openwrt_add_repo="https://github.com/QiuSimons/OpenWrt-Add.git"
 openwrt_node_repo="https://github.com/nxhack/openwrt-node-packages.git"
-passwall_pkg_repo="https://github.com/xiaorouji/openwrt-passwall"
+passwall_pkg_repo="https://github.com/xiaorouji/openwrt-passwall-packages"
 passwall_luci_repo="https://github.com/xiaorouji/openwrt-passwall"
 openwrt_third_repo="https://github.com/jjm2473/openwrt-third"
 dockerman_repo="https://github.com/lisaac/luci-app-dockerman"
@@ -58,12 +58,12 @@ clone_repo $openwrt_repo main openwrt_ma &
 clone_repo $openwrt_repo openwrt-22.03 openwrt_22 &
 clone_repo $openwrt_pkg_repo master openwrt_pkg_ma &
 clone_repo $openwrt_luci_repo master openwrt_luci_ma &
-clone_repo $lienol_repo master Lienol &
+clone_repo $lienol_repo 23.05 Lienol &
 clone_repo $lienol_pkg_repo main Lienol_pkg &
 clone_repo $openwrt_add_repo master OpenWrt-Add &
 clone_repo $openwrt_node_repo master openwrt-node &
-clone_repo $passwall_pkg_repo packages passwall_pkg &
-clone_repo $passwall_luci_repo luci passwall_luci &
+clone_repo $passwall_pkg_repo main passwall_pkg &
+clone_repo $passwall_luci_repo main passwall_luci &
 clone_repo $openwrt_third_repo main openwrt-third &
 clone_repo $dockerman_repo master dockerman &
 clone_repo $diskman_repo master diskman &
