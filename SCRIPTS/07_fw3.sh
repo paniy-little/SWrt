@@ -13,6 +13,10 @@ sed -i 's,iptables-nft,iptables-legacy,g' ./package/new/luci-app-passwall/Makefi
 sed -i 's,iptables-nft +kmod-nft-fullcone,iptables-mod-fullconenat,g' ./package/new/addition-trans-zh/Makefile
 rm -rf ./feeds/packages/net/miniupnpd
 cp -rf ../immortalwrt_pkg_21/net/miniupnpd ./feeds/packages/net/miniupnpd
+wget https://github.com/miniupnp/miniupnp/commit/d491fc5.patch -O feeds/packages/net/miniupnpd/patches/d491fc5.patch 
+sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/d491fc5.patch 
+wget https://github.com/miniupnp/miniupnp/commit/6fa568d.patch -O feeds/packages/net/miniupnpd/patches/6fa568d.patch
+sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/6fa568d.patch
 rm -rf ./feeds/luci/applications/luci-app-upnp
 cp -rf ../immortalwrt_luci_21/applications/luci-app-upnp ./feeds/luci/applications/luci-app-upnp
 sed -i '/firewall/d' ./.config
