@@ -354,7 +354,7 @@ ln -sf ../../../feeds/packages/net/kcptun ./package/feeds/packages/kcptun
 # grep -qF "shadowsocksr_server" luci-app-ssr-plus/root/etc/init.d/shadowsocksr || wget -qO - https://github.com/fw876/helloworld/pull/1249.patch | patch -p1
 # popd
 # pushd package/new/luci-app-ssr-plus
-# sed -i '/Clang.CN.CIDR/a\o:value("https://gh.404delivr.workers.dev/https://github.com/QiuSimons/Chnroute/raw/master/dist/chnroute/chnroute.txt", translate("QiuSimons/Chnroute"))' luasrc/model/cbi/shadowsocksr/advanced.lua
+# sed -i '/Clang.CN.CIDR/a\o:value("https://fastly.jsdelivr.net/gh/QiuSimons/Chnroute@master/dist/chnroute/chnroute.txt", translate("QiuSimons/Chnroute"))' luasrc/model/cbi/shadowsocksr/advanced.lua
 # popd
 # v2raya
 git clone --depth 1 https://github.com/zxlhhyccc/luci-app-v2raya.git package/new/luci-app-v2raya
