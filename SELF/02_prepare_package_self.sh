@@ -281,7 +281,7 @@ git clone -b master --depth 1 https://github.com/NateLol/luci-app-oled.git packa
 # homeproxy
 git clone --single-branch --depth 1 -b dev https://github.com/immortalwrt/homeproxy.git package/new/homeproxy
 rm -rf ./feeds/packages/net/sing-box
-cp -rf ../immortalwrt_pkg/net/sing-box ./feeds/packages/net/sing-box
+cp -rf ../passwall_pkg/sing-box ./feeds/packages/net/sing-box
 # OpenClash
 #git clone --single-branch --depth 1 -b master https://github.com/vernesong/OpenClash.git package/new/luci-app-openclash
 # Passwall
@@ -297,6 +297,7 @@ cp -rf ../passwall_pkg/brook ./package/new/brook
 cp -rf ../passwall_pkg/ssocks ./package/new/ssocks
 cp -rf ../passwall_pkg/microsocks ./package/new/microsocks
 cp -rf ../passwall_pkg/dns2socks ./package/new/dns2socks
+cp -rf ../passwall_pkg/dns2tcp ./package/new/dns2tcp
 cp -rf ../passwall_pkg/ipt2socks ./package/new/ipt2socks
 cp -rf ../passwall_pkg/pdnsd-alt ./package/new/pdnsd-alt
 cp -rf ../OpenWrt-Add/trojan-plus ./package/new/trojan-plus
@@ -334,7 +335,7 @@ cp -rf ../ssrp/tuic-client ./package/new/tuic-client
 cp -rf ../ssrp/redsocks2 ./package/new/redsocks2
 cp -rf ../ssrp/trojan ./package/new/trojan
 cp -rf ../ssrp/tcping ./package/new/tcping
-cp -rf ../ssrp/dns2tcp ./package/new/dns2tcp
+#cp -rf ../ssrp/dns2tcp ./package/new/dns2tcp
 cp -rf ../ssrp/gn ./package/new/gn
 cp -rf ../ssrp/shadowsocksr-libev ./package/new/shadowsocksr-libev
 cp -rf ../ssrp/simple-obfs ./package/new/simple-obfs
