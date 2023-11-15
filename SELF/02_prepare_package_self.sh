@@ -31,7 +31,7 @@ sed -ri "/luci-cgi_io.socket/i\ \t\tuwsgi_send_timeout 600\;\n\t\tuwsgi_connect_
 
 ### 必要的 Patches ###
 # TCP optimizations
-#cp -rf ../PATCH/backport/TCP/* ./target/linux/generic/backport-5.15/
+cp -rf ../PATCH/backport/TCP/* ./target/linux/generic/backport-5.15/
 # x86_csum
 cp -rf ../PATCH/backport/x86_csum/* ./target/linux/generic/backport-5.15/
 # Patch arm64 型号名称
