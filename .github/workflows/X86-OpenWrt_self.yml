@@ -21,7 +21,7 @@ jobs:
       with:
         swap-size-mb: 512
         temp-reserve-mb: 128
-        root-reserve-mb: 2560
+        root-reserve-mb: 3072
         remove-dotnet: 'true'
         remove-android: 'true'
         remove-haskell: 'true'
@@ -64,7 +64,6 @@ jobs:
       run: |
         cd openwrt
         cp -rf ../SELF/X86/config_self.seed .config
-        /bin/bash 07_fw3.sh
     - name: Convert Translation
       run: |
         cd openwrt
