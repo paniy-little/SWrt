@@ -511,17 +511,17 @@ patch -p1 < ../PATCH/firewall/luci-app-firewall_add_sfe_switch.patch
 # Shortcut-FE 相关组件
 mkdir ./package/lean
 mkdir ./package/lean/shortcut-fe
-cp -rf ../lede/package/lean/shortcut-fe/fast-classifier ./package/lean/shortcut-fe/fast-classifier
+cp -rf ../lede/package/qca/shortcut-fe/fast-classifier ./package/lean/shortcut-fe/fast-classifier
 wget -qO - https://github.com/coolsnowwolf/lede/commit/331f04f.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/232b8b4.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/ec795c9.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/789f805.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/6398168.patch | patch -p1
-cp -rf ../lede/package/lean/shortcut-fe/shortcut-fe ./package/lean/shortcut-fe/shortcut-fe
+cp -rf ../lede/package/qca/shortcut-fe/shortcut-fe ./package/lean/shortcut-fe/shortcut-fe
 wget -qO - https://github.com/coolsnowwolf/lede/commit/0e29809.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/eb70dad.patch | patch -p1
 wget -qO - https://github.com/coolsnowwolf/lede/commit/7ba3ec0.patch | patch -p1
-cp -rf ../lede/package/lean/shortcut-fe/simulated-driver ./package/lean/shortcut-fe/simulated-driver
+cp -rf ../lede/package/qca/shortcut-fe/simulated-driver ./package/lean/shortcut-fe/simulated-driver
 
 # NAT6
 git clone --depth 1 https://github.com/sbwml/packages_new_nat6 package/new/packages_new_nat6
