@@ -384,6 +384,11 @@ pushd package/new
 wget -qO - https://github.com/Lienol/openwrt-package/pull/39.patch | patch -p1
 popd
 sed -i '/socat\.config/d' feeds/packages/net/socat/Makefile
+# natmap
+rm -rf ./feeds/packages/net/natmap
+cp -rf ../natmap/natmap ./package/new/natmap
+rm -rf ./feeds/luci/applications/luci-app-autoreboot
+cp -rf ../natmap/luci-app-natmap ./package/new/luci-app-natmap
 # 订阅转换
 cp -rf ../immortalwrt_pkg/net/subconverter ./feeds/packages/net/subconverter
 ln -sf ../../../feeds/packages/net/subconverter ./package/feeds/packages/subconverter
