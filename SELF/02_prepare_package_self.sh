@@ -102,8 +102,6 @@ cp -rf ../immortalwrt_23/package/boot/uboot-rockchip ./package/boot/uboot-rockch
 rm -rf ./package/boot/arm-trusted-firmware-rockchip
 cp -rf ../immortalwrt_23/package/boot/arm-trusted-firmware-rockchip ./package/boot/arm-trusted-firmware-rockchip
 sed -i '/REQUIRE_IMAGE_METADATA/d' target/linux/rockchip/armv8/base-files/lib/upgrade/platform.sh
-# 在下个release时删掉
-wget -qO - https://github.com/immortalwrt/immortalwrt/commit/4e7e1e851ff3c9b9af9dda83d4a7baea83c8ebdf.patch | patch -Rp1
 #intel-firmware
 wget -qO - https://github.com/openwrt/openwrt/commit/9c58add.patch | patch -p1
 wget -qO - https://github.com/openwrt/openwrt/commit/64f1a65.patch | patch -p1
@@ -178,8 +176,8 @@ cp -rf ../Lienol/tools/ucl ./tools/ucl
 cp -rf ../Lienol/tools/upx ./tools/upx
 # 更换 golang 版本
 rm -rf ./feeds/packages/lang/golang
-#cp -rf ../openwrt_pkg_ma/lang/golang ./feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages/lang/golang
+cp -rf ../openwrt_pkg_ma/lang/golang ./feeds/packages/lang/golang
+#git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages/lang/golang
 # 访问控制
 cp -rf ../lede_luci/applications/luci-app-accesscontrol ./package/new/luci-app-accesscontrol
 cp -rf ../OpenWrt-Add/luci-app-control-weburl ./package/new/luci-app-control-weburl
@@ -316,6 +314,7 @@ cp -rf ../passwall_pkg/ipt2socks ./package/new/ipt2socks
 cp -rf ../passwall_pkg/pdnsd-alt ./package/new/pdnsd-alt
 cp -rf ../OpenWrt-Add/trojan-plus ./package/new/trojan-plus
 cp -rf ../passwall_pkg/xray-plugin ./package/new/xray-plugin
+cp -rf ../passwall_pkg/xray-core ./package/new/xray-core
 # Passwall 白名单
 echo '
 teamviewer.com
@@ -358,9 +357,9 @@ cp -rf ../sbwfw876/naiveproxy ./package/new/naiveproxy
 cp -rf ../sbwfw876/v2ray-core ./package/new/v2ray-core
 cp -rf ../passwall_pkg/hysteria ./package/new/hysteria
 cp -rf ../sbwfw876/sagernet-core ./package/new/sagernet-core
-rm -rf ./feeds/packages/net/xray-core
-cp -rf ../immortalwrt_pkg/net/xray-core ./feeds/packages/net/xray-core
-sed -i '/CURDIR/d' feeds/packages/net/xray-core/Makefile
+#rm -rf ./feeds/packages/net/xray-core
+#cp -rf ../immortalwrt_pkg/net/xray-core ./feeds/packages/net/xray-core
+#sed -i '/CURDIR/d' feeds/packages/net/xray-core/Makefile
 cp -rf ../sbwfw876/v2ray-plugin ./package/new/v2ray-plugin
 cp -rf ../sbwfw876/shadowsocks-rust ./package/new/shadowsocks-rust
 cp -rf ../sbwfw876/lua-neturl ./package/new/lua-neturl
@@ -388,8 +387,6 @@ wget -qO - https://github.com/Lienol/openwrt-package/pull/39.patch | patch -p1
 popd
 sed -i '/socat\.config/d' feeds/packages/net/socat/Makefile
 # natmap
-rm -rf ./feeds/packages/net/natmap
-rm -rf ./feeds/luci/applications/luci-app-natmap
 git clone --depth 1 --branch master --single-branch --no-checkout https://github.com/muink/luci-app-natmapt.git package/luci-app-natmapt
 pushd package/luci-app-natmapt
 umask 022
