@@ -122,6 +122,8 @@ sed -i 's,noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-pc.cf
 
 
 ### 获取额外的 LuCI 应用、主题和依赖 ###
+# fix PF_RING-8.0.0
+wget -qO - https://github.com/SergeyFilippov/openwrt/commit/e66ca39.patch | patch -p1
 # dae ready
 cp -rf ../immortalwrt_pkg/net/dae ./feeds/packages/net/dae
 ln -sf ../../../feeds/packages/net/dae ./package/feeds/packages/dae
@@ -364,9 +366,9 @@ cp -rf ../sbwfw876/naiveproxy ./package/new/naiveproxy
 cp -rf ../sbwfw876/v2ray-core ./package/new/v2ray-core
 cp -rf ../passwall_pkg/hysteria ./package/new/hysteria
 cp -rf ../sbwfw876/sagernet-core ./package/new/sagernet-core
-#rm -rf ./feeds/packages/net/xray-core
-#cp -rf ../immortalwrt_pkg/net/xray-core ./feeds/packages/net/xray-core
-#sed -i '/CURDIR/d' feeds/packages/net/xray-core/Makefile
+rm -rf ./feeds/packages/net/xray-core
+cp -rf ../immortalwrt_pkg/net/xray-core ./feeds/packages/net/xray-core
+sed -i '/CURDIR/d' feeds/packages/net/xray-core/Makefile
 cp -rf ../sbwfw876/v2ray-plugin ./package/new/v2ray-plugin
 cp -rf ../sbwfw876/shadowsocks-rust ./package/new/shadowsocks-rust
 cp -rf ../sbwfw876/lua-neturl ./package/new/lua-neturl
