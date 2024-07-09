@@ -513,8 +513,8 @@ svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos packa
 #luci-app-cloudflarespeedtest
 #svn export https://github.com/kenzok8/small-package/trunk/luci-app-cloudflarespeedtest package/new/luci-app-cloudflarespeedtest
 ##fix bug
-#rm -rf ./package/kernel/mac80211/*
-#cp -rf ../lede/package/kernel/mac80211/* ./package/kernel/mac80211/
+rm -rf ./package/kernel/mac80211/*
+cp -rf ../openwrt_snap/package/kernel/mac80211/* ./package/kernel/mac80211/
 #rm -rf ./package/kernel/ath10k-ct/*
 #cp -rf ../lede/package/kernel/ath10k-ct/* ./package/kernel/ath10k-ct/
 
