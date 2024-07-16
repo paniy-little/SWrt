@@ -347,12 +347,12 @@ CONFIG_PACKAGE_openssh-sftp-server=y
 #CONFIG_PACKAGE_luci-app-uugamebooster=y
 
 ##fix bug
-CONFIG_PACKAGE_kmod-ath=y
-CONFIG_PACKAGE_kmod-cfg80211=y
-CONFIG_PACKAGE_kmod-mac80211=y
-CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
-CONFIG_PACKAGE_kmod-qrtr-smd=y
-CONFIG_PACKAGE_kmod-qrtr-mhi=y
+#CONFIG_PACKAGE_kmod-ath=y
+#CONFIG_PACKAGE_kmod-cfg80211=y
+#CONFIG_PACKAGE_kmod-mac80211=y
+#CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
+#CONFIG_PACKAGE_kmod-qrtr-smd=y
+#CONFIG_PACKAGE_kmod-qrtr-mhi=y
 
 ### OTHERS ###
 CONFIG_PACKAGE_kmod-crypto-cmac=y

@@ -204,28 +204,28 @@ ln -sf ../../../feeds/luci/applications/luci-app-arpbind ./package/feeds/luci/lu
 cp -rf ../immortalwrt_luci/applications/luci-app-autoreboot ./feeds/luci/applications/luci-app-autoreboot
 ln -sf ../../../feeds/luci/applications/luci-app-autoreboot ./package/feeds/luci/luci-app-autoreboot
 # Boost 通用即插即用
-rm -rf ./feeds/packages/net/miniupnpd
-cp -rf ../openwrt_pkg_ma/net/miniupnpd ./feeds/packages/net/miniupnpd
-wget https://github.com/miniupnp/miniupnp/commit/0e8c68d.patch -O feeds/packages/net/miniupnpd/patches/0e8c68d.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/0e8c68d.patch
-wget https://github.com/miniupnp/miniupnp/commit/21541fc.patch -O feeds/packages/net/miniupnpd/patches/21541fc.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/21541fc.patch
-wget https://github.com/miniupnp/miniupnp/commit/b78a363.patch -O feeds/packages/net/miniupnpd/patches/b78a363.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/b78a363.patch
-wget https://github.com/miniupnp/miniupnp/commit/8f2f392.patch -O feeds/packages/net/miniupnpd/patches/8f2f392.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/8f2f392.patch
-wget https://github.com/miniupnp/miniupnp/commit/60f5705.patch -O feeds/packages/net/miniupnpd/patches/60f5705.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/60f5705.patch
-wget https://github.com/miniupnp/miniupnp/commit/3f3582b.patch -O feeds/packages/net/miniupnpd/patches/3f3582b.patch
-sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/3f3582b.patch
-pushd feeds/packages
-patch -p1 <../../../PATCH/miniupnpd/01-set-presentation_url.patch
-patch -p1 <../../../PATCH/miniupnpd/02-force_forwarding.patch
-patch -p1 <../../../PATCH/miniupnpd/03-Update-301-options-force_forwarding-support.patch.patch
-popd
-pushd feeds/luci
-wget -qO- https://github.com/openwrt/luci/commit/0b5fb915.patch | patch -p1
-popd
+# rm -rf ./feeds/packages/net/miniupnpd
+# cp -rf ../openwrt_pkg_ma/net/miniupnpd ./feeds/packages/net/miniupnpd
+# wget https://github.com/miniupnp/miniupnp/commit/0e8c68d.patch -O feeds/packages/net/miniupnpd/patches/0e8c68d.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/0e8c68d.patch
+# wget https://github.com/miniupnp/miniupnp/commit/21541fc.patch -O feeds/packages/net/miniupnpd/patches/21541fc.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/21541fc.patch
+# wget https://github.com/miniupnp/miniupnp/commit/b78a363.patch -O feeds/packages/net/miniupnpd/patches/b78a363.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/b78a363.patch
+# wget https://github.com/miniupnp/miniupnp/commit/8f2f392.patch -O feeds/packages/net/miniupnpd/patches/8f2f392.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/8f2f392.patch
+# wget https://github.com/miniupnp/miniupnp/commit/60f5705.patch -O feeds/packages/net/miniupnpd/patches/60f5705.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/60f5705.patch
+# wget https://github.com/miniupnp/miniupnp/commit/3f3582b.patch -O feeds/packages/net/miniupnpd/patches/3f3582b.patch
+# sed -i 's,/miniupnpd/,/,g' ./feeds/packages/net/miniupnpd/patches/3f3582b.patch
+# pushd feeds/packages
+# patch -p1 <../../../PATCH/miniupnpd/01-set-presentation_url.patch
+# patch -p1 <../../../PATCH/miniupnpd/02-force_forwarding.patch
+# patch -p1 <../../../PATCH/miniupnpd/03-Update-301-options-force_forwarding-support.patch.patch
+# popd
+# pushd feeds/luci
+# wget -qO- https://github.com/openwrt/luci/commit/0b5fb915.patch | patch -p1
+# popd
 # ChinaDNS
 git clone -b luci --depth 1 https://github.com/QiuSimons/openwrt-chinadns-ng.git package/new/luci-app-chinadns-ng
 cp -rf ../passwall_pkg/chinadns-ng ./package/new/chinadns-ng
@@ -513,8 +513,8 @@ svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos packa
 #luci-app-cloudflarespeedtest
 #svn export https://github.com/kenzok8/small-package/trunk/luci-app-cloudflarespeedtest package/new/luci-app-cloudflarespeedtest
 ##fix bug
-rm -rf ./package/kernel/mac80211/*
-cp -rf ../openwrt_snap/package/kernel/mac80211/* ./package/kernel/mac80211/
+#rm -rf ./package/kernel/mac80211/*
+#cp -rf ../openwrt_snap/package/kernel/mac80211/* ./package/kernel/mac80211/
 #rm -rf ./package/kernel/ath10k-ct/*
 #cp -rf ../lede/package/kernel/ath10k-ct/* ./package/kernel/ath10k-ct/
 
