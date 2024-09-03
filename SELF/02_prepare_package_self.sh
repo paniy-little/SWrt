@@ -465,6 +465,7 @@ echo > ./feeds/packages/utils/watchcat/files/watchcat.config
 mkdir -p package/sirpdboy
 cp -rf ../sirpdboy/luci-app-autotimeset ./package/sirpdboy/luci-app-autotimeset
 sed -i 's,"control","system",g' package/sirpdboy/luci-app-autotimeset/luasrc/controller/autotimeset.lua
+sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' package/sirpdboy/luci-app-autotimeset/root/usr/bin/timesethandler
 sed -i '/firstchild/d' package/sirpdboy/luci-app-autotimeset/luasrc/controller/autotimeset.lua
 sed -i 's,control,system,g' package/sirpdboy/luci-app-autotimeset/luasrc/view/autotimeset/log.htm
 sed -i '/start()/a \    echo "Service autotimesetrun started!" >/dev/null' package/sirpdboy/luci-app-autotimeset/root/etc/init.d/autotimesetrun
