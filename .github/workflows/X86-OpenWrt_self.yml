@@ -58,7 +58,7 @@ jobs:
         /bin/bash 02_prepare_package_self.sh
         /bin/bash 02_target_only_self.sh
         /bin/bash 04_remove_upx.sh
-    - name: QTMDFW4
+    - name: Apply Config
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         cp -rf ../SELF/X86/config_self.seed .config
