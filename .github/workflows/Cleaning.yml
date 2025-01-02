@@ -17,6 +17,7 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true
 
   Cleanup-Old-Artifacts:
     runs-on: ubuntu-24.04
@@ -26,6 +27,7 @@ jobs:
       with:
           age: '3 days'
           skip-recent: 3
+      continue-on-error: true
         
   Cleanup-Workflow-Logs:
     runs-on: ubuntu-24.04
@@ -36,3 +38,4 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           retain_days: 3
+        continue-on-error: true

@@ -140,6 +140,8 @@ sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/defau
 sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-efi.cfg
 sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-iso.cfg
 sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-pc.cfg
+# nanopi
+sed -i 's,CONFIG_PREEMPT=y,CONFIG_PREEMPT_NONE_BUILD=y,g' target/linux/rockchip/armv8/config-6.6
 
 ### ADD PKG 部分 ###
 cp -rf ../OpenWrt-Add ./package/new
