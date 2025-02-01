@@ -67,24 +67,24 @@ echo "net.netfilter.nf_conntrack_tcp_max_retrans=5" >>./package/kernel/linux/fil
 # OTHERS
 cp -rf ../PATCH/kernel/others/* ./target/linux/generic/pending-6.6/
 
-### Fullcone-NAT 部分 ###
-# bcmfullcone
-cp -rf ../PATCH/kernel/bcmfullcone/* ./target/linux/generic/hack-6.6/
-# set nf_conntrack_expect_max for fullcone
-wget -qO - https://github.com/openwrt/openwrt/commit/bbf39d07.patch | patch -p1
-echo "net.netfilter.nf_conntrack_helper = 1" >>./package/kernel/linux/files/sysctl-nf-conntrack.conf
-# FW4
-mkdir -p package/network/config/firewall4/patches
-cp -f ../PATCH/pkgs/firewall/firewall4_patches/*.patch ./package/network/config/firewall4/patches/
-mkdir -p package/libs/libnftnl/patches
-cp -f ../PATCH/pkgs/firewall/libnftnl/*.patch ./package/libs/libnftnl/patches/
-sed -i '/PKG_INSTALL:=/iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-mkdir -p package/network/utils/nftables/patches
-cp -f ../PATCH/pkgs/firewall/nftables/*.patch ./package/network/utils/nftables/patches/
-# Patch LuCI 以增添 FullCone 开关
-pushd feeds/luci
-patch -p1 <../../../PATCH/pkgs/firewall/luci/0001-luci-app-firewall-add-nft-fullcone-and-bcm-fullcone-.patch
-popd
+# ### Fullcone-NAT 部分 ###
+# # bcmfullcone
+# cp -rf ../PATCH/kernel/bcmfullcone/* ./target/linux/generic/hack-6.6/
+# # set nf_conntrack_expect_max for fullcone
+# wget -qO - https://github.com/openwrt/openwrt/commit/bbf39d07.patch | patch -p1
+# echo "net.netfilter.nf_conntrack_helper = 1" >>./package/kernel/linux/files/sysctl-nf-conntrack.conf
+# # FW4
+# mkdir -p package/network/config/firewall4/patches
+# cp -f ../PATCH/pkgs/firewall/firewall4_patches/*.patch ./package/network/config/firewall4/patches/
+# mkdir -p package/libs/libnftnl/patches
+# cp -f ../PATCH/pkgs/firewall/libnftnl/*.patch ./package/libs/libnftnl/patches/
+# sed -i '/PKG_INSTALL:=/iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
+# mkdir -p package/network/utils/nftables/patches
+# cp -f ../PATCH/pkgs/firewall/nftables/*.patch ./package/network/utils/nftables/patches/
+# # Patch LuCI 以增添 FullCone 开关
+# pushd feeds/luci
+# patch -p1 <../../../PATCH/pkgs/firewall/luci/0001-luci-app-firewall-add-nft-fullcone-and-bcm-fullcone-.patch
+# popd
 
 ### Shortcut-FE 部分 ###
 # Patch Kernel 以支持 Shortcut-FE
@@ -95,27 +95,27 @@ pushd feeds/luci
 patch -p1 <../../../PATCH/pkgs/firewall/luci/0002-luci-app-firewall-add-shortcut-fe-option.patch
 popd
 
-### NAT6 部分 ###
-# custom nft command
-patch -p1 < ../PATCH/pkgs/firewall/100-openwrt-firewall4-add-custom-nft-command-support.patch
-# Patch LuCI 以增添 NAT6 开关
-pushd feeds/luci
-patch -p1 <../../../PATCH/pkgs/firewall/luci/0003-luci-app-firewall-add-ipv6-nat-option.patch
-popd
-# Patch LuCI 以支持自定义 nft 规则
-pushd feeds/luci
-patch -p1 <../../../PATCH/pkgs/firewall/luci/0004-luci-add-firewall-add-custom-nft-rule-support.patch
-popd
+# ### NAT6 部分 ###
+# # custom nft command
+# patch -p1 < ../PATCH/pkgs/firewall/100-openwrt-firewall4-add-custom-nft-command-support.patch
+# # Patch LuCI 以增添 NAT6 开关
+# pushd feeds/luci
+# patch -p1 <../../../PATCH/pkgs/firewall/luci/0003-luci-app-firewall-add-ipv6-nat-option.patch
+# popd
+# # Patch LuCI 以支持自定义 nft 规则
+# pushd feeds/luci
+# patch -p1 <../../../PATCH/pkgs/firewall/luci/0004-luci-add-firewall-add-custom-nft-rule-support.patch
+# popd
 
-### natflow 部分 ###
-pushd feeds/luci
-patch -p1 <../../../PATCH/pkgs/firewall/luci/0005-luci-app-firewall-add-natflow-offload-support.patch
-popd
+# ### natflow 部分 ###
+# pushd feeds/luci
+# patch -p1 <../../../PATCH/pkgs/firewall/luci/0005-luci-app-firewall-add-natflow-offload-support.patch
+# popd
 
-### fullcone6 ###
-pushd feeds/luci
-patch -p1 <../../../PATCH/pkgs/firewall/luci/0007-luci-app-firewall-add-fullcone6-option-for-nftables-.patch
-popd
+# ### fullcone6 ###
+# pushd feeds/luci
+# patch -p1 <../../../PATCH/pkgs/firewall/luci/0007-luci-app-firewall-add-fullcone6-option-for-nftables-.patch
+# popd
 
 ### Other Kernel Hack 部分 ###
 # make olddefconfig
@@ -205,18 +205,18 @@ sed -i '/boot()/,+2d' feeds/packages/net/ddns-scripts/files/etc/init.d/ddns
 cp -rf ../diskman/applications/luci-app-diskman ./package/new/luci-app-diskman
 mkdir -p package/new/parted && \
 wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Parted.Makefile -O package/new/parted/Makefile
-# IPv6 兼容助手
-patch -p1 <../PATCH/pkgs/odhcp6c/1002-odhcp6c-support-dhcpv6-hotplug.patch
-# ODHCPD
-mkdir -p package/network/services/odhcpd/patches
-cp -f ../PATCH/pkgs/odhcpd/0001-odhcpd-improve-RFC-9096-compliance.patch ./package/network/services/odhcpd/patches/0001-odhcpd-improve-RFC-9096-compliance.patch
-mkdir -p package/network/ipv6/odhcp6c/patches
-wget https://github.com/openwrt/odhcp6c/pull/75.patch -O package/network/ipv6/odhcp6c/patches/75.patch
-wget https://github.com/openwrt/odhcp6c/pull/80.patch -O package/network/ipv6/odhcp6c/patches/80.patch
-wget https://github.com/openwrt/odhcp6c/pull/82.patch -O package/network/ipv6/odhcp6c/patches/82.patch
-wget https://github.com/openwrt/odhcp6c/pull/83.patch -O package/network/ipv6/odhcp6c/patches/83.patch
-wget https://github.com/openwrt/odhcp6c/pull/84.patch -O package/network/ipv6/odhcp6c/patches/84.patch
-wget https://github.com/openwrt/odhcp6c/pull/90.patch -O package/network/ipv6/odhcp6c/patches/90.patch
+# # IPv6 兼容助手
+# patch -p1 <../PATCH/pkgs/odhcp6c/1002-odhcp6c-support-dhcpv6-hotplug.patch
+# # ODHCPD
+# mkdir -p package/network/services/odhcpd/patches
+# cp -f ../PATCH/pkgs/odhcpd/0001-odhcpd-improve-RFC-9096-compliance.patch ./package/network/services/odhcpd/patches/0001-odhcpd-improve-RFC-9096-compliance.patch
+# mkdir -p package/network/ipv6/odhcp6c/patches
+# wget https://github.com/openwrt/odhcp6c/pull/75.patch -O package/network/ipv6/odhcp6c/patches/75.patch
+# wget https://github.com/openwrt/odhcp6c/pull/80.patch -O package/network/ipv6/odhcp6c/patches/80.patch
+# wget https://github.com/openwrt/odhcp6c/pull/82.patch -O package/network/ipv6/odhcp6c/patches/82.patch
+# wget https://github.com/openwrt/odhcp6c/pull/83.patch -O package/network/ipv6/odhcp6c/patches/83.patch
+# wget https://github.com/openwrt/odhcp6c/pull/84.patch -O package/network/ipv6/odhcp6c/patches/84.patch
+# wget https://github.com/openwrt/odhcp6c/pull/90.patch -O package/network/ipv6/odhcp6c/patches/90.patch
 # watchcat
 echo > ./feeds/packages/utils/watchcat/files/watchcat.config
 # 默认开启 Irqbalance
