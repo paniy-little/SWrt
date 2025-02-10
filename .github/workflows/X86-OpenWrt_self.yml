@@ -29,6 +29,14 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
+    - name: Restore APT cache
+      id: restore-apt-cache
+      uses: actions/cache@v4     with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-cache-
+
     - name: Restore dl directory cache
       id: restore-dl-cache
       uses: actions/cache@v4
@@ -182,18 +190,23 @@ jobs:
         artifacts: ./artifact/*.zip
         updateOnlyUnreleased: false
 
+    - name: Save APT cache
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
+
     - name: Save dl directory cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: openwrt/dl
         key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
 
     - name: Save CMake and Python packages cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip, ~/.cmake/packages
         key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
 
     - name: Print Disk Space After
       run: df -h
-      
