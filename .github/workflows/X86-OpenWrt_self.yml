@@ -1,6 +1,9 @@
 name: X86-OpenWrt-Current
 
 on:
+  push:
+    branches:
+      - "24.10"  # 或者你希望触发工作的分支名称
   workflow_dispatch:
   schedule:
     - cron: 0 10 * * *
