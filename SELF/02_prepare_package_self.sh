@@ -238,8 +238,8 @@ wget https://raw.githubusercontent.com/hello-yunshu/selfuse/master/openwrt/yunsh
 sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 #accesscontrol
 #svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-accesscontrol package/new/luci-app-accesscontrol
-#luci-app-eqos
-svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos package/new/luci-app-eqos
+# #luci-app-eqos
+# svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-eqos package/new/luci-app-eqos
 #luci-app-guest-wifi
 #svn export https://github.com/kenzok8/openwrt-packages/trunk/luci-app-guest-wifi package/new/luci-app-guest-wifi
 #luci-app-pushbot
