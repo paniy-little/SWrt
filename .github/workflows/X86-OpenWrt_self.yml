@@ -8,13 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    #if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
     - name: Show system
       run: |
         echo -e "Total CPU cores\t: $(nproc)"
         cat /proc/cpuinfo | grep 'model name'
+
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
@@ -25,8 +25,24 @@ jobs:
         remove-android: 'true'
         remove-haskell: 'true'
         remove-codeql: 'true'
+
     - name: Checkout
       uses: actions/checkout@main
+
+    - name: Restore dl directory cache
+      id: restore-dl-cache
+      uses: actions/cache@v4
+      with:
+        path: openwrt/dl
+        key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
+
+    - name: Restore CMake and Python packages cache
+      id: restore-cmake-python-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip, ~/.cmake/packages
+        key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
+
     - name: Init build dependencies
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -43,12 +59,14 @@ jobs:
         sudo -E git config --global user.name 'GitHub Actions' && git config --global user.email 'noreply@github.com'
         sudo -E git config --global core.abbrev auto
         df -h
+
     - name: Prepare Mixedwrt
       run: |
         sudo chown -R runner:runner /home/runner/work/SWrt
         cp -r ./SCRIPTS/X86/. ./SCRIPTS/
         cp -r ./SCRIPTS/. ./
         /bin/bash 01_get_ready.sh
+
     - name: Prepare Package
       working-directory: ${{ github.workspace }}/openwrt
       run: |
@@ -58,27 +76,33 @@ jobs:
         /bin/bash 02_prepare_package_self.sh
         /bin/bash 02_target_only_self.sh
         /bin/bash 04_remove_upx.sh
+
     - name: Apply Config
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         cp -rf ../SELF/X86/config_self.seed .config
+
     - name: Convert Translation
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         /bin/bash 03_convert_translation.sh
+
     - name: Add ACL
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         /bin/bash 05_create_acl_for_luci.sh -a
+
     - name: Fix Permissions
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         sudo -E chmod -R 755 ./08_fix_permissions.sh
         /bin/bash 08_fix_permissions.sh
+
     - name: Make Config
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         make defconfig
+
     - name: Get Architecture
       working-directory: ${{ github.workspace }}/openwrt
       run: |
@@ -88,15 +112,18 @@ jobs:
         echo "latest_release=${latest_release}" >>$GITHUB_ENV
         latest_time="$(date +%Y-%m-%d)"
         echo "latest_time=${latest_time}" >>$GITHUB_ENV
+
     - name: Cache
       uses: HiGarfield/cachewrtbuild@main
       with:
         mixkey: ${{ env.TARGET_DEVICE_ARCH }}
         prefix: ${{ github.workspace }}/openwrt
+
     - name: Make Download
       working-directory: ${{ github.workspace }}/openwrt
       run: |
         make download -j50
+
     - name: Compile Openwrt
       working-directory: ${{ github.workspace }}/openwrt
       id: compileopenwrt
@@ -106,6 +133,7 @@ jobs:
         make -j$(($(nproc) + 1)) package/network/utils/nftables/refresh V=s
         IGNORE_ERRORS=1 make -j$(($(nproc) + 1))
         echo $?
+
     - name: If Error
       working-directory: ${{ github.workspace }}/openwrt
       if: steps.compileopenwrt.outcome == 'failure'
@@ -113,6 +141,7 @@ jobs:
         cat ./.config
         echo '================================================================'
         make -j1 V=s
+
     - name: Organize files
       id: organize
       run: |
@@ -132,6 +161,7 @@ jobs:
         #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *x86-64-generic*
         #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-sfs.zip *squashfs-combined*
         ls -Ahl
+
     - name: Upload artifact
       uses: actions/upload-artifact@main
       with:
@@ -151,5 +181,19 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ./artifact/*.zip
         updateOnlyUnreleased: false
+
+    - name: Save dl directory cache
+      uses: actions/cache@v3
+      with:
+        path: openwrt/dl
+        key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
+
+    - name: Save CMake and Python packages cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip, ~/.cmake/packages
+        key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
+
     - name: Print Disk Space After
       run: df -h
+      
