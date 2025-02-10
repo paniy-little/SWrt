@@ -76,6 +76,12 @@ jobs:
         cp -r ./SCRIPTS/. ./
         /bin/bash 01_get_ready.sh
 
+    - name: Update Feeds
+      working-directory: ${{ github.workspace }}/openwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
     - name: Prepare Package
       working-directory: ${{ github.workspace }}/openwrt
       run: |
@@ -106,12 +112,6 @@ jobs:
       run: |
         sudo -E chmod -R 755 ./08_fix_permissions.sh
         /bin/bash 08_fix_permissions.sh
-
-    - name: Update Feeds
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
 
     - name: Make Config
       working-directory: ${{ github.workspace }}/openwrt
