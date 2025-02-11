@@ -50,24 +50,15 @@ jobs:
           cd target-repo
           git add .
 
-      - name: Check for Differences
-        id: check_diff
-        run: |
-          cd target-repo
-          if git diff --cached --quiet; then
-            echo "No differences found."
-            echo "::set-output name=has_changes::false"
-          else
-            echo "Differences found."
-            echo "::set-output name=has_changes::true"
-          fi
-
-      - name: Commit and Push Changes
-        if: steps.check_diff.outputs.has_changes == 'true'
+      - name: Check for Differences and Commit/Push Changes
         run: |
           cd target-repo
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          git commit -m "Sync files from source repository (exclude SELF and .github) at $(date +'%Y-%m-%d %H:%M:%S')"
-          git push origin 24.10
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync files from source repository (exclude SELF and .github) at $(date +'%Y-%m-%d %H:%M:%S')"
+            git push origin 24.10
+          else
+            echo "No differences found. No changes to commit."
+          fi
