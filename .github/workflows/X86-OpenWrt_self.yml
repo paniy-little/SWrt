@@ -32,14 +32,14 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    - name: Restore APT cache
-      id: restore-apt-cache
-      uses: actions/cache@v4
-      with:
-        path: /var/cache/apt/archives
-        key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
-        restore-keys: |
-          ${{ runner.os }}-apt-cache-
+    # - name: Restore APT cache
+    #   id: restore-apt-cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: /var/cache/apt/archives
+    #     key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
+    #     restore-keys: |
+    #       ${{ runner.os }}-apt-cache-
 
     # - name: Restore dl directory cache
     #   id: restore-dl-cache
@@ -48,12 +48,12 @@ jobs:
     #     path: openwrt/dl
     #     key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
 
-    - name: Restore CMake and Python packages cache
-      id: restore-cmake-python-cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip, ~/.cmake/packages
-        key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
+    # - name: Restore CMake and Python packages cache
+    #   id: restore-cmake-python-cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: ~/.cache/pip, ~/.cmake/packages
+    #     key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
 
     - name: Init build dependencies
       env:
@@ -200,24 +200,24 @@ jobs:
         artifacts: ./artifact/*.zip
         updateOnlyUnreleased: false
 
-    - name: Change permissions for APT cache directories
-      run: |
-        sudo chmod -R a+rw /var/cache/apt/archives
+    # - name: Change permissions for APT cache directories
+    #   run: |
+    #     sudo chmod -R a+rw /var/cache/apt/archives
 
-    - name: Check APT cache directory existence and contents
-      run: |
-        if [ -d "/var/cache/apt/archives" ]; then
-          echo "APT cache directory exists."
-          ls -la /var/cache/apt/archives
-        else
-          echo "APT cache directory does not exist."
-        fi
+    # - name: Check APT cache directory existence and contents
+    #   run: |
+    #     if [ -d "/var/cache/apt/archives" ]; then
+    #       echo "APT cache directory exists."
+    #       ls -la /var/cache/apt/archives
+    #     else
+    #       echo "APT cache directory does not exist."
+    #     fi
 
-    - name: Save APT cache
-      uses: actions/cache@v4
-      with:
-        path: /var/cache/apt/archives
-        key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
+    # - name: Save APT cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: /var/cache/apt/archives
+    #     key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
 
     # - name: Check dl directory existence and contents
     #   run: |
@@ -234,21 +234,21 @@ jobs:
     #     path: openwrt/dl
     #     key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
 
-    - name: Check CMake and Python packages directory existence and contents
-      run: |
-        if [ -d "~/.cache/pip" ] || [ -d "~/.cmake/packages" ]; then
-          echo "CMake and Python packages directories exist."
-          ls -la ~/.cache/pip
-          ls -la ~/.cmake/packages
-        else
-          echo "CMake and Python packages directories do not exist."
-        fi
+    # - name: Check CMake and Python packages directory existence and contents
+    #   run: |
+    #     if [ -d "~/.cache/pip" ] || [ -d "~/.cmake/packages" ]; then
+    #       echo "CMake and Python packages directories exist."
+    #       ls -la ~/.cache/pip
+    #       ls -la ~/.cmake/packages
+    #     else
+    #       echo "CMake and Python packages directories do not exist."
+    #     fi
 
-    - name: Save CMake and Python packages cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip, ~/.cmake/packages
-        key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
+    # - name: Save CMake and Python packages cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: ~/.cache/pip, ~/.cmake/packages
+    #     key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
 
     - name: Print Disk Space After
       run: df -h
