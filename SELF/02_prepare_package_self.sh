@@ -147,6 +147,10 @@ rm -rf feeds/packages/net/{xray-core,v2ray-core,v2ray-geodata,sing-box,frp,micro
 rm -rf feeds/luci/applications/{luci-app-frps,luci-app-frpc,luci-app-zerotier,luci-app-filemanager}
 rm -rf feeds/packages/utils/coremark
 
+### DAED TEST ###
+rm -rf ./package/new/luci-app-daed
+git clone -b test https://github.com/QiuSimons/luci-app-daed package/new/luci-app-daed
+
 ### 获取额外的 LuCI 应用、主题和依赖 ###
 # 更换 Nodejs 版本
 rm -rf ./feeds/packages/lang/node
