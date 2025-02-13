@@ -19,6 +19,7 @@ jobs:
           repository: paniy-little/SWrt # 目标仓库
           ref: "24.10" # 目标分支
           path: target-repo # 将目标仓库克隆到本地目录
+          token: ${{ secrets.GITHUB_TOKEN }} # 使用 GITHUB_TOKEN 进行身份验证
 
       - name: Backup SELF Directory in Target Repository
         run: |
