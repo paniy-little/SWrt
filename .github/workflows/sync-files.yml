@@ -58,7 +58,13 @@ jobs:
           
           if ! git diff --cached --quiet; then
             git commit -m "Sync files from source repository (exclude SELF and .github) at $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin 24.10
+            git push origin "24.10"
           else
             echo "No differences found. No changes to commit."
           fi
+
+      - name: Debugging Information
+        run: |
+          cd target-repo
+          git status
+          git log -1
