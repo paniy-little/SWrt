@@ -107,10 +107,10 @@ popd
 # patch -p1 <../../../PATCH/pkgs/firewall/luci/0004-luci-add-firewall-add-custom-nft-rule-support.patch
 # popd
 
-# ### natflow 部分 ###
-# pushd feeds/luci
-# patch -p1 <../../../PATCH/pkgs/firewall/luci/0005-luci-app-firewall-add-natflow-offload-support.patch
-# popd
+### natflow 部分 ###
+pushd feeds/luci
+patch -p1 <../../../PATCH/pkgs/firewall/luci/0005-luci-app-firewall-add-natflow-offload-support.patch
+popd
 
 # ### fullcone6 ###
 # pushd feeds/luci
