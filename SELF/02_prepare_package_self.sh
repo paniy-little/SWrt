@@ -221,6 +221,17 @@ wget https://github.com/openwrt/odhcp6c/pull/90.patch -O package/network/ipv6/od
 echo > ./feeds/packages/utils/watchcat/files/watchcat.config
 # 默认开启 Irqbalance
 #sed -i "s/enabled '0'/enabled '1'/g" feeds/packages/utils/irqbalance/files/irqbalance.config
+
+# 使用 TEO CPU 空闲调度器
+KERNEL_VERSION="6.6"
+CONFIG_CONTENT='
+CONFIG_CPU_IDLE_GOV_MENU=n
+CONFIG_CPU_IDLE_GOV_TEO=y
+'
+# 查找所有与内核 6.6 相关的配置文件并将这些配置项追加到文件末尾
+find ./target/linux/ -name "config-${KERNEL_VERSION}" | xargs -I{} sh -c "echo '$CONFIG_CONTENT' | tee -a {} > /dev/null"
+
+##自用
 echo -e " Yunshu Build on "$(date +%Y.%m.%d)"\n -----------------------------------------------------\n" >> package/base-files/files/etc/banner
 #补全部分依赖（实际上并不会用到
 #svn export https://github.com/openwrt/openwrt/branches/master/package/libs/libjson-c package/libs/libjson-c
