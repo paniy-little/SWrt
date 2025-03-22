@@ -195,6 +195,7 @@ jobs:
         prerelease: false
         tag: X86-${{ env.latest_release }}
         commit: "24.10"
+        removeArtifacts: true
         replacesArtifacts: true
         token: ${{ secrets.GITHUB_TOKEN }}
         artifacts: ./artifact/*.zip
