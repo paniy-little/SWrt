@@ -267,6 +267,7 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 #cp -rf ../lede/package/kernel/ath10k-ct/* ./package/kernel/ath10k-ct/
 # sirpdboy
 sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-autotimeset/root/usr/bin/timesethandler
+grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
 cp -rf ../passwall_pkg/xray-core ./package/new/xray-core
 cp -rf ../passwall_pkg/xray-plugin ./package/new/xray-plugin
 cp -rf ../passwall_pkg/haproxy ./package/new/haproxy
