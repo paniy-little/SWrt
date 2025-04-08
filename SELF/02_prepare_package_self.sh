@@ -270,7 +270,7 @@ sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-autotimeset
 rm -rf ./package/new/openwrt_helloworld
 grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
 echo "上面是内容"
-cp -rf ../passwall_pkg/* ./package/passwall/passwall_pkg
+cp -rf ../passwall_pkg/* ./package/passwall/passwall_pkg/
 cp -rf ../passwall_luci/luci-app-passwall ./package/passwall/luci-app-passwall
 
 
