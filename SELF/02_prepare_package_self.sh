@@ -271,6 +271,7 @@ rm -rf ./package/new/openwrt_helloworld
 grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
 echo "上面是内容"
 cp -rf ../passwall_pkg/* ./package/new/
+rm -rf ../package/new/shadowsocks-rust
 cp -rf ../passwall_luci/luci-app-passwall ./package/new/luci-app-passwall
 
 

@@ -77,7 +77,8 @@ jobs:
         sudo chown -R runner:runner /home/runner/work/SWrt
         cp -r ./SCRIPTS/X86/. ./SCRIPTS/
         cp -r ./SCRIPTS/. ./
-        /bin/bash 01_get_ready.sh
+        cp -r ./SELF/. ./
+        /bin/bash 01_get_ready_self.sh
 
     # - name: Update Feeds
     #   working-directory: ${{ github.workspace }}/openwrt
