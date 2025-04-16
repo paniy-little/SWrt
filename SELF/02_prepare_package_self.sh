@@ -266,7 +266,7 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 #rm -rf ./package/kernel/ath10k-ct/*
 #cp -rf ../lede/package/kernel/ath10k-ct/* ./package/kernel/ath10k-ct/
 # sirpdboy
-sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-autotimeset/root/usr/bin/timesethandler
+sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-taskplan/root/usr/bin/timesethandler
 cp -rf ../passwall_pkg/* ./package/new/
 rm -rf ./package/new/shadowsocks-rust
 cp -rf ../passwall_luci/luci-app-passwall ./package/new/luci-app-passwall
