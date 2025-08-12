@@ -66,6 +66,8 @@ cp -rf ../PATCH/kernel/wg/* ./target/linux/generic/hack-6.6/
 echo "net.netfilter.nf_conntrack_tcp_max_retrans=5" >>./package/kernel/linux/files/sysctl-nf-conntrack.conf
 # OTHERS
 cp -rf ../PATCH/kernel/others/* ./target/linux/generic/pending-6.6/
+# ppp_fix
+wget -qO - https://github.com/immortalwrt/immortalwrt/commit/9d852a0.patch | patch -p1
 
 # ### Fullcone-NAT 部分 ###
 # # bcmfullcone
