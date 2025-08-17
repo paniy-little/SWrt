@@ -57,7 +57,6 @@ CONFIG_USE_LTO=y
 CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
 CONFIG_PACKAGE_addition-trans-zh=y
 CONFIG_PACKAGE_autocore-x86=y
-CONFIG_PACKAGE_coreutils-timeout=y
 CONFIG_PACKAGE_ethtool=y
 CONFIG_PACKAGE_dnsmasq-full=y
 CONFIG_PACKAGE_dnsmasq_full_ipset=y
@@ -251,6 +250,7 @@ CONFIG_PACKAGE_zramctl=y
 #CONFIG_PACKAGE_ariang=y
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_bc=y
+CONFIG_PACKAGE_coreutils=y
 CONFIG_PACKAGE_coreutils-stat=y
 CONFIG_PACKAGE_drill=y
 CONFIG_PACKAGE_fail2ban=y
@@ -267,6 +267,7 @@ CONFIG_PACKAGE_zstd=y
 
 
 # More
+CONFIG_PACKAGE_coreutils-timeout=y
 CONFIG_PACKAGE_coreutils-nohup=y
 CONFIG_PACKAGE_gdisk=y
 #CONFIG_PACKAGE_iperf3=y
