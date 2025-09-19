@@ -1,256 +1,49 @@
-name: X86-OpenWrt-Current
+name: X86-OpenWrt-Self
 
 on:
-  push:
-    branches:
-      - "24.10"  # 或者你希望触发工作的分支名称
-  workflow_dispatch:
   schedule:
-    - cron: 0 10 * * *
+    - cron: '0 10 * * *'    # 每天北京时间 10:00
+  workflow_dispatch:
+    inputs:
+      upload_source:
+        description: "Upload source folder before build"
+        required: false
+        type: boolean
+        default: false
+      build_firmware:
+        description: "Build and publish firmware"
+        required: false
+        type: boolean
+        default: true
+      badge_status:
+        description: "badge status var（keep empty）"
+        required: false
+        type: string
+        default: ''
+  watch:
+    types: started
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    uses: ./.github/workflows/OpenWrt-Matrix.yml
+    if: >-
+      (github.event.repository.owner.id == github.event.sender.id ||
+       github.event_name == 'schedule') &&
+      inputs.badge_status == ''
+    with:
+      targets: "X86"
+      upload_source: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_source }}
+      build_firmware: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_firmware) || github.event_name != 'workflow_dispatch' }}
 
+  sync_badge:
+    if: inputs.badge_status != ''
+    runs-on: ubuntu-latest
     steps:
-    - name: Show system
-      run: |
-        echo -e "Total CPU cores\t: $(nproc)"
-        cat /proc/cpuinfo | grep 'model name'
-
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        swap-size-mb: 1024
-        temp-reserve-mb: 512
-        root-reserve-mb: 4608
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-
-    - name: Checkout
-      uses: actions/checkout@main
-
-    # - name: Restore APT cache
-    #   id: restore-apt-cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: /var/cache/apt/archives
-    #     key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
-    #     restore-keys: |
-    #       ${{ runner.os }}-apt-cache-
-
-    # - name: Restore dl directory cache
-    #   id: restore-dl-cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: openwrt/dl
-    #     key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
-
-    # - name: Restore CMake and Python packages cache
-    #   id: restore-cmake-python-cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: ~/.cache/pip, ~/.cmake/packages
-    #     key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
-
-    - name: Init build dependencies
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo -E apt-get -qq update
-        sudo /bin/bash -c "$(curl -sL https://git.io/vokNn)"
-        sudo -E apt-fast -y -qq install asciidoc bash bcc bin86 binutils bison bzip2 clang-15 llvm-15 file flex g++ g++-multilib gawk gcc-multilib gettext git gzip help2man intltool libboost-dev libelf-dev libncurses-dev libssl-dev libthread-queue-any-perl libusb-dev libxml-parser-perl make patch perl-modules python3-dev python3-pip python3-pyelftools python3-setuptools rsync sharutils swig time unzip util-linux wget xsltproc zlib1g-dev zip zstd
-        sudo -E apt-fast -y -qq install subversion qemu-utils
-        sudo -E apt-fast -y -qq install dos2unix dwarves quilt npm jq
-        sudo -E npm install -g pnpm
-        pip3 install --user -U pylibfdt --break-system-packages
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo -E git config --global user.name 'GitHub Actions' && git config --global user.email 'noreply@github.com'
-        sudo -E git config --global core.abbrev auto
-        df -h
-
-    - name: Prepare Mixedwrt
-      run: |
-        sudo chown -R runner:runner /home/runner/work/SWrt
-        cp -r ./SCRIPTS/X86/. ./SCRIPTS/
-        cp -r ./SCRIPTS/. ./
-        cp -r ./SELF/. ./
-        /bin/bash 01_get_ready_self.sh
-
-    # - name: Update Feeds
-    #   working-directory: ${{ github.workspace }}/openwrt
-    #   run: |
-    #     ./scripts/feeds update -a
-    #     ./scripts/feeds install -a
-
-    - name: Prepare Package
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        cp -r ../SCRIPTS/. ./
-        cp -r ../SELF/. ./
-        cp -r ../SELF/X86/. ./
-        /bin/bash 02_prepare_package_self.sh
-        /bin/bash 02_target_only_self.sh
-        /bin/bash 04_remove_upx.sh
-
-    - name: Apply Config
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        cp -rf ../SELF/X86/config_self.seed .config
-
-    - name: Convert Translation
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        /bin/bash 03_convert_translation.sh
-
-    - name: Add ACL
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        /bin/bash 05_create_acl_for_luci.sh -a
-
-    - name: Fix Permissions
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        sudo -E chmod -R 755 ./08_fix_permissions.sh
-        /bin/bash 08_fix_permissions.sh
-
-    - name: Make Config
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        make defconfig
-
-    - name: Get Architecture
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        TARGET_DEVICE_ARCH="$(grep "^CONFIG_TARGET_.*_.*=y$" ".config" | head -n 1 | sed 's/^CONFIG_TARGET_//g' | awk -F '_' '{print $1}')"
-        echo "TARGET_DEVICE_ARCH=${TARGET_DEVICE_ARCH}" >>$GITHUB_ENV
-        latest_release="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][4-9]/p' | sed -n 1p | sed 's/.tar.gz//g' | sed 's/v//g')"
-        echo "latest_release=${latest_release}" >>$GITHUB_ENV
-        latest_time="$(date +%Y-%m-%d)"
-        echo "latest_time=${latest_time}" >>$GITHUB_ENV
-
-    - name: Cache
-      uses: HiGarfield/cachewrtbuild@main
-      with:
-        mixkey: ${{ env.TARGET_DEVICE_ARCH }}
-        prefix: ${{ github.workspace }}/openwrt
-
-    - name: Make Download
-      working-directory: ${{ github.workspace }}/openwrt
-      run: |
-        make download -j50
-
-    - name: Compile Openwrt
-      working-directory: ${{ github.workspace }}/openwrt
-      id: compileopenwrt
-      continue-on-error: true
-      run: |
-        #echo | make kernel_oldconfig -j$(($(nproc) + 1)) 
-        make -j$(($(nproc) + 1)) package/network/utils/nftables/refresh V=s
-        IGNORE_ERRORS=1 make -j$(($(nproc) + 1))
-        echo $?
-
-    - name: If Error
-      working-directory: ${{ github.workspace }}/openwrt
-      if: steps.compileopenwrt.outcome == 'failure'
-      run: |
-        cat ./.config
-        echo '================================================================'
-        make -j1 V=s
-
-    - name: Organize files
-      id: organize
-      run: |
-        rm -rf ./artifact/
-        mkdir -p ./artifact/
-        mv openwrt/bin/targets/x86/64/*combined-efi.img* ./artifact/
-        mv openwrt/bin/targets/x86/64/*combined-efi.vhdx* ./artifact/
-        mv openwrt/bin/targets/x86/64/*generic-rootfs.tar.gz* ./artifact/
-        cd ./artifact/
-        ls -Ahl
-        #gzip -d *.gz && exit 0
-        gzip --best *.img
-        gzip --best *.vhdx
-        ls -Ahl
-        sha256sum openwrt*x86* | tee X86-${{ env.latest_time }}-${{ env.latest_release }}.sha256sum
-        zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *x86-64-generic*
-        #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *x86-64-generic*
-        #zip X86-${{ env.latest_time }}-${{ env.latest_release }}-sfs.zip *squashfs-combined*
-        ls -Ahl
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@main
-      with:
-        name: OpenWRT_${{ env.latest_release }}
-        path: ./artifact/
-
-    - name: Create release
-      id: create_release
-      uses: ncipollo/release-action@main
-      with:
-        name: OpenWRT-${{ env.latest_release }}
-        allowUpdates: true
-        prerelease: false
-        tag: X86-${{ env.latest_release }}
-        commit: "24.10"
-        removeArtifacts: true
-        replacesArtifacts: true
-        token: ${{ secrets.GITHUB_TOKEN }}
-        artifacts: ./artifact/*.zip
-        updateOnlyUnreleased: false
-
-    # - name: Change permissions for APT cache directories
-    #   run: |
-    #     sudo chmod -R a+rw /var/cache/apt/archives
-
-    # - name: Check APT cache directory existence and contents
-    #   run: |
-    #     if [ -d "/var/cache/apt/archives" ]; then
-    #       echo "APT cache directory exists."
-    #       ls -la /var/cache/apt/archives
-    #     else
-    #       echo "APT cache directory does not exist."
-    #     fi
-
-    # - name: Save APT cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: /var/cache/apt/archives
-    #     key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/Dockerfile') }}
-
-    # - name: Check dl directory existence and contents
-    #   run: |
-    #     if [ -d "./openwrt/dl" ]; then
-    #       echo "DL directory exists."
-    #       ls -la ./openwrt/dl
-    #     else
-    #       echo "DL directory does not exist."
-    #     fi
-
-    # - name: Save dl directory cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: openwrt/dl
-    #     key: ${{ runner.os }}-dl-${{ hashFiles('**/feeds.conf.default') }}
-
-    # - name: Check CMake and Python packages directory existence and contents
-    #   run: |
-    #     if [ -d "~/.cache/pip" ] || [ -d "~/.cmake/packages" ]; then
-    #       echo "CMake and Python packages directories exist."
-    #       ls -la ~/.cache/pip
-    #       ls -la ~/.cmake/packages
-    #     else
-    #       echo "CMake and Python packages directories do not exist."
-    #     fi
-
-    # - name: Save CMake and Python packages cache
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: ~/.cache/pip, ~/.cmake/packages
-    #     key: ${{ runner.os }}-cmake-python-${{ hashFiles('**/requirements.txt', '**/CMakeLists.txt') }}
-
-    - name: Print Disk Space After
-      run: df -h
+      - name: Sync badge status
+        run: |
+          echo "Syncing badge status ...( ${{ inputs.badge_status }} )"
+          if [ "${{ inputs.badge_status }}" == "success" ]; then
+            exit 0
+          else
+            exit 1
+          fi
