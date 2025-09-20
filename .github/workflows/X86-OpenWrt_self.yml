@@ -26,10 +26,7 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/OpenWrt-Matrix.yml
-    if: >-
-      (github.event.repository.owner.id == github.event.sender.id ||
-       github.event_name == 'schedule') &&
-      inputs.badge_status == ''
+    if: inputs.badge_status == ''
     with:
       targets: "X86"
       upload_source: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_source }}
