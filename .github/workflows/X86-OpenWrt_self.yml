@@ -9,7 +9,7 @@ on:
         description: "Upload source folder before build"
         required: false
         type: boolean
-        default: false
+        default: true
       build_firmware:
         description: "Build and publish firmware"
         required: false

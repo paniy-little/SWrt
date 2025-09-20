@@ -191,6 +191,7 @@ jobs:
       - name: Prepare Package (using SELF)
         working-directory: ${{ github.workspace }}/openwrt
         run: |
+          cp -r ../SCRIPTS/. ./
           cp -r ../SELF/. ./
           /bin/bash 02_prepare_package_self.sh
           /bin/bash 02_target_only_self.sh
@@ -339,6 +340,7 @@ jobs:
         with:
           name: OpenWRT_${{ env.latest_release }}_${{ matrix.name }}
           path: ./artifact/
+          retention-days: 5
 
       - name: Create release
         if: inputs.build_firmware
