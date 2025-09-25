@@ -67,9 +67,9 @@ echo "net.netfilter.nf_conntrack_tcp_max_retrans=5" >>./package/kernel/linux/fil
 # OTHERS
 cp -rf ../PATCH/kernel/others/* ./target/linux/generic/pending-6.6/
 # 6.17_ppp_performance
-wget https://github.com/torvalds/linux/commit/95d0d09.patch -O target/linux/generic/pending-6.6/999-1-95d0d09.patch
-wget https://github.com/torvalds/linux/commit/1a3e9b7.patch -O target/linux/generic/pending-6.6/999-2-1a3e9b7.patch
-wget https://github.com/torvalds/linux/commit/7eebd21.patch -O target/linux/generic/pending-6.6/999-3-7eebd21.patch
+wget https://github.com/torvalds/linux/commit/95d0d094.patch -O target/linux/generic/pending-6.6/999-1-95d0d09.patch
+wget https://github.com/torvalds/linux/commit/1a3e9b7a.patch -O target/linux/generic/pending-6.6/999-2-1a3e9b7.patch
+wget https://github.com/torvalds/linux/commit/7eebd219.patch -O target/linux/generic/pending-6.6/999-3-7eebd21.patch
 # ppp_fix
 wget -qO - https://github.com/immortalwrt/immortalwrt/commit/9d852a0.patch | patch -p1
 
