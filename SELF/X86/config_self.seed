@@ -164,7 +164,7 @@ CONFIG_PACKAGE_kmod-fast-classifier=y
 # CONFIG_PACKAGE_natflow-boot=y
 ##CONFIG_PACKAGE_luci-app-nikki=y
 ##CONFIG_PACKAGE_luci-app-filemanager=y
-CONFIG_PACKAGE_luci-app-einat=y
+##CONFIG_PACKAGE_luci-app-einat=y
 CONFIG_PACKAGE_luci-app-bandix=y
 
 ### SSRP ###
