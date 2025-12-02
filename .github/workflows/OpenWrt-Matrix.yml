@@ -171,6 +171,8 @@ jobs:
           # -----------------------------------------------------
           sudo -E apt-fast -y -qq install dos2unix dwarves jq npm quilt
           sudo -E npm install -g pnpm
+          sudo -E npm install -g n
+          sudo -E n stable
           pip3 install --user -U pylibfdt --break-system-packages
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
