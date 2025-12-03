@@ -352,7 +352,7 @@ jobs:
           name: OpenWRT-${{ env.latest_release }}
           allowUpdates: true
           prerelease: false
-          tag: X86-${{ env.latest_release }} # 修改 tag 格式以匹配 X86-OpenWrt_self.yml
+          tag: ${{ matrix.name }}-${{ env.latest_release }} # 使用平台名称作为tag前缀
           commit: "24.10"
           removeArtifacts: true
           replacesArtifacts: true
@@ -369,5 +369,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Triggering badge sync for ${{ matrix.name }} with status: ${{ steps.create_release.outcome }}"
-          gh workflow run "${{ matrix.name }}-OpenWrt_self.yml" \
-            --field badge_status="${{ steps.create_release.outcome }}" || echo "Failed to trigger ${{ matrix.name }} workflow"
+          # 只触发实际存在的工作流
+          workflow_name="${{ matrix.name }}-OpenWrt_self.yml"
+          gh workflow run "$workflow_name" \
+            --field badge_status="${{ steps.create_release.outcome }}" || echo "Failed to trigger ${{ matrix.name }} workflow: $workflow_name not found"

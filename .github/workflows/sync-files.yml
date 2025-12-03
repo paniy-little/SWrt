@@ -35,10 +35,20 @@ jobs:
           ref: "24.10" # 源分支
           path: source-repo # 将源仓库克隆到本地目录
 
+      - name: Verify Source Repository Integrity
+        run: |
+          # 检查源仓库是否完整克隆
+          if ! git -C source-repo rev-parse --verify HEAD > /dev/null 2>&1; then
+            echo "Error: Source repository clone failed or is incomplete"
+            exit 1
+          fi
+          echo "Source repository integrity verified successfully"
+
       - name: Copy Files from Source to Target and Restore SELF
         run: |
           # 使用 rsync 复制源仓库的所有文件到目标仓库，并排除 .github 和 SELF 目录
-          rsync -av --delete --exclude='.github' --exclude='SELF' source-repo/ target-repo/
+          # 移除 --delete 参数以避免意外删除目标仓库的特有文件
+          rsync -av --exclude='.github' --exclude='SELF' source-repo/ target-repo/
           
           # 如果目标仓库中存在 SELF 备份，恢复它
           if [ -d "target-repo/SELF.backup" ]; then
@@ -57,9 +67,27 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
+          # 使用更规范的ISO 8601时间格式
+          timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          
           if ! git diff --cached --quiet; then
-            git commit -m "Sync files from source repository (exclude SELF and .github) at $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin "24.10"
+            # 尝试提交，处理可能的冲突
+            if git commit -m "Sync files from source repository (exclude SELF and .github) at $timestamp"; then
+              echo "Commit successful, pushing changes..."
+              if git push origin "24.10"; then
+                echo "Push successful"
+              else
+                echo "Error: Push failed, please check permissions or network issues"
+                exit 1
+              fi
+            else
+              echo "Error: Commit failed, likely due to merge conflicts"
+              echo "Current git status:"
+              git status
+              echo "Diff of changes:"
+              git diff
+              exit 1
+            fi
           else
             echo "No differences found. No changes to commit."
           fi
