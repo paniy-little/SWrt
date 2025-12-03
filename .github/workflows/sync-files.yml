@@ -28,18 +28,25 @@ jobs:
             cp -r target-repo/SELF target-repo/SELF.backup
           fi
 
-      - name: Checkout Source Repository
-        uses: actions/checkout@v4
-        with:
-          repository: QiuSimons/YAOF # 源仓库
-          ref: "24.10" # 源分支
-          path: source-repo # 将源仓库克隆到本地目录
+      - name: Download Source Repository as Zip
+        run: |
+          # 直接下载源仓库的zip文件，避免需要git权限
+          wget -O source-repo.zip https://github.com/QiuSimons/YAOF/archive/refs/heads/24.10.zip
+          echo "Source repository zip file downloaded successfully"
+
+      - name: Extract Source Repository
+        run: |
+          # 解压zip文件
+          unzip -q source-repo.zip
+          # 重命名解压后的目录为source-repo，保持与后续步骤兼容
+          mv YAOF-24.10 source-repo
+          echo "Source repository extracted successfully"
 
       - name: Verify Source Repository Integrity
         run: |
-          # 检查源仓库是否完整克隆
-          if ! git -C source-repo rev-parse --verify HEAD > /dev/null 2>&1; then
-            echo "Error: Source repository clone failed or is incomplete"
+          # 检查解压后的仓库是否包含必要的文件
+          if [ ! -d "source-repo" ]; then
+            echo "Error: Source repository extraction failed"
             exit 1
           fi
           echo "Source repository integrity verified successfully"
@@ -55,6 +62,11 @@ jobs:
             rm -rf target-repo/SELF
             mv target-repo/SELF.backup target-repo/SELF
           fi
+          
+          # 清理临时文件
+          rm -f source-repo.zip
+          rm -rf source-repo
+          echo "Temporary files cleaned up successfully"
 
       - name: Stage Changes in Target Repository
         run: |
