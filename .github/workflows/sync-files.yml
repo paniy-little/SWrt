@@ -102,6 +102,8 @@ jobs:
             fi
           else
             echo "No differences found. No changes to commit."
+            # 输出到Annotations，便于在GitHub Actions界面查看
+            echo "::notice file=sync-files.yml,line=1,col=1::源仓库与目标仓库无差异，未提交任何更改。上次检查时间：$timestamp"
           fi
 
       - name: Debugging Information
