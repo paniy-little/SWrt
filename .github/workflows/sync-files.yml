@@ -83,11 +83,19 @@ jobs:
           timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           
           if ! git diff --cached --quiet; then
+            # 获取更新的文件列表
+            changed_files=$(git diff --cached --name-only)
+            # 计算更新的文件数量
+            changed_count=$(echo "$changed_files" | wc -l)
+            
             # 尝试提交，处理可能的冲突
             if git commit -m "Sync files from source repository (exclude SELF and .github) at $timestamp"; then
               echo "Commit successful, pushing changes..."
               if git push origin "24.10"; then
                 echo "Push successful"
+                # 输出详细的更新信息到Annotations
+                echo "::notice file=sync-files.yml,line=1,col=1::已成功从源仓库同步文件，共更新了 $changed_count 个文件。上次检查时间：$timestamp"
+                echo "::notice file=sync-files.yml,line=2,col=1::更新的文件列表：$changed_files"
               else
                 echo "Error: Push failed, please check permissions or network issues"
                 exit 1
