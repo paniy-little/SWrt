@@ -59,8 +59,20 @@ jobs:
         run: |
           # 使用 rsync 复制源仓库的所有文件到目标仓库，并排除 .github 和 SELF 目录
           # 移除 --delete 参数以避免意外删除目标仓库的特有文件
-          rsync -av --exclude='.github' --exclude='SELF' source-repo/ target-repo/
-          
+          rsync -av \
+            --exclude='SELF' \
+            --exclude='.github/' \
+            source-repo/ target-repo/
+
+          # 单独同步 .github/workflows/ 中的两个指定文件
+          mkdir -p target-repo/.github/workflows/
+          if [ -f "source-repo/.github/workflows/OpenWrt-Matrix.yml" ]; then
+            cp "source-repo/.github/workflows/OpenWrt-Matrix.yml" "target-repo/.github/workflows/"
+          fi
+          if [ -f "source-repo/.github/workflows/X86-OpenWrt.yml" ]; then
+            cp "source-repo/.github/workflows/X86-OpenWrt.yml" "target-repo/.github/workflows/"
+          fi
+
           # 如果目标仓库中存在 SELF 备份，恢复它
           if [ -d "target-repo/SELF.backup" ]; then
             rm -rf target-repo/SELF
