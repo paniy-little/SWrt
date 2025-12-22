@@ -11,13 +11,17 @@ on:
 jobs:
   sync-files:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target_branch: ["24.10", "25.12"]
+      fail-fast: false  # 一个分支失败不影响另一个
 
     steps:
-      - name: Checkout Target Repository
+      - name: Checkout Target Repository (${{ matrix.target_branch }})
         uses: actions/checkout@v4
         with:
           repository: paniy-little/SWrt # 目标仓库
-          ref: "24.10" # 目标分支
+          ref: ${{ matrix.target_branch }} # 目标分支（动态：24.10或25.12）
           path: target-repo # 将目标仓库克隆到本地目录
           token: ${{ secrets.GITHUB_TOKEN }} # 使用 GITHUB_TOKEN 进行身份验证
 
@@ -31,7 +35,7 @@ jobs:
       - name: Download Source Repository as Zip
         run: |
           # 直接下载源仓库的zip文件，避免需要git权限
-          wget -O source-repo.zip https://github.com/QiuSimons/YAOF/archive/refs/heads/24.10.zip
+          wget -O source-repo.zip https://github.com/QiuSimons/YAOF/archive/refs/heads/${{ matrix.target_branch }}.zip
           echo "Source repository zip file downloaded successfully"
 
       - name: Extract Source Repository
@@ -39,7 +43,7 @@ jobs:
           # 解压zip文件
           unzip -q source-repo.zip
           # 重命名解压后的目录为source-repo，保持与后续步骤兼容
-          mv YAOF-24.10 source-repo
+          mv YAOF-${{ matrix.target_branch }} source-repo
           echo "Source repository extracted successfully"
 
       - name: Verify Source Repository Integrity
@@ -55,8 +59,20 @@ jobs:
         run: |
           # 使用 rsync 复制源仓库的所有文件到目标仓库，并排除 .github 和 SELF 目录
           # 移除 --delete 参数以避免意外删除目标仓库的特有文件
-          rsync -av --exclude='.github' --exclude='SELF' source-repo/ target-repo/
-          
+          rsync -av \
+            --exclude='SELF' \
+            --exclude='.github/' \
+            source-repo/ target-repo/
+
+          # 单独同步 .github/workflows/ 中的两个指定文件
+          mkdir -p target-repo/.github/workflows/
+          if [ -f "source-repo/.github/workflows/OpenWrt-Matrix.yml" ]; then
+            cp "source-repo/.github/workflows/OpenWrt-Matrix.yml" "target-repo/.github/workflows/"
+          fi
+          if [ -f "source-repo/.github/workflows/X86-OpenWrt.yml" ]; then
+            cp "source-repo/.github/workflows/X86-OpenWrt.yml" "target-repo/.github/workflows/"
+          fi
+
           # 如果目标仓库中存在 SELF 备份，恢复它
           if [ -d "target-repo/SELF.backup" ]; then
             rm -rf target-repo/SELF
@@ -91,7 +107,7 @@ jobs:
             # 尝试提交，处理可能的冲突
             if git commit -m "Sync files from source repository (exclude SELF and .github) at $timestamp"; then
               echo "Commit successful, pushing changes..."
-              if git push origin "24.10"; then
+              if git push origin ${{ matrix.target_branch }}; then
                 echo "Push successful"
                 # 输出详细的更新信息到Annotations
                 echo "::notice file=sync-files.yml,line=1,col=1::已成功从源仓库同步文件，共更新了 $changed_count 个文件。上次检查时间：$timestamp"
