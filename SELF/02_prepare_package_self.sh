@@ -249,15 +249,17 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 #rm -rf ./package/kernel/ath10k-ct/*
 #cp -rf ../lede/package/kernel/ath10k-ct/* ./package/kernel/ath10k-ct/
 # sirpdboy
-sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-taskplan/root/usr/bin/timesethandler
-cp -rf ../passwall_pkg/* ./package/new/
-rm -rf ./package/new/shadowsocks-rust
-cp -rf ../passwall_luci/luci-app-passwall ./package/new/luci-app-passwall
+# sed -i 's/114\.114\.114\.114/119\.29\.29\.29/g' ../sirpdboy/luci-app-taskplan/root/usr/bin/timesethandler
+# cp -rf ../passwall_pkg/* ./package/new/
+# rm -rf ./package/new/shadowsocks-rust
+# cp -rf ../passwall_luci/luci-app-passwall ./package/new/luci-app-passwall
 
-cp -rf ./package/new/openwrt_helloworld/shadowsocks-rust ./package/new/shadowsocks-rust
-rm -rf ./package/new/openwrt_helloworld
-grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
-echo "上面是内容"
+# cp -rf ./package/new/openwrt_helloworld/shadowsocks-rust ./package/new/shadowsocks-rust
+# rm -rf ./package/new/openwrt_helloworld
+# grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
+# echo "上面是内容"
+# eth0和eth1对调
+sed -i 's/eth0/__TEMP__/g; s/eth1/eth0/g; s/__TEMP__/eth1/g' package/base-files/etc/config/network
 
 
 ### 最后的收尾工作 ###
