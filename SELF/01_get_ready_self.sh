@@ -56,6 +56,8 @@ clone_repo $immortalwrt_repo openwrt-23.05 immortalwrt_23 &
 
 clone_repo $lede_repo master lede &
 clone_repo $lede_pkg_repo master lede_pkg_ma &
+clone_repo $passwall_luci_repo main passwall_luci &
+clone_repo $passwall_pkg_repo main passwall_pkg &
 clone_repo $openwrt_repo main openwrt_ma &
 clone_repo $openwrt_pkg_repo master openwrt_pkg_ma &
 clone_repo $openwrt_add_repo master OpenWrt-Add &
