@@ -64,13 +64,10 @@ jobs:
             --exclude='.github/' \
             source-repo/ target-repo/
 
-          # 单独同步 .github/workflows/ 中的两个指定文件
-          mkdir -p target-repo/.github/workflows/
-          if [ -f "source-repo/.github/workflows/OpenWrt-Matrix.yml" ]; then
-            cp "source-repo/.github/workflows/OpenWrt-Matrix.yml" "target-repo/.github/workflows/"
-          fi
-          if [ -f "source-repo/.github/workflows/X86-OpenWrt.yml" ]; then
-            cp "source-repo/.github/workflows/X86-OpenWrt.yml" "target-repo/.github/workflows/"
+          # 同步整个 .github/workflows/ 目录到 workflows-templates/
+          if [ -d "source-repo/.github/workflows/" ]; then
+            mkdir -p target-repo/workflows-templates/
+            cp -r source-repo/.github/workflows/* target-repo/workflows-templates/
           fi
 
           # 如果目标仓库中存在 SELF 备份，恢复它
@@ -135,3 +132,4 @@ jobs:
           cd target-repo
           git status
           git log -1
+          
