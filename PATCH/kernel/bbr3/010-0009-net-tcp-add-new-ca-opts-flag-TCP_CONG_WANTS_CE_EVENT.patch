@@ -1,7 +1,7 @@
-From a1ee90ba05c238f06d875c9ed324f5bd01c417ae Mon Sep 17 00:00:00 2001
+From 55dba52fd12522bb1c211acdd37f051e8bf5c57b Mon Sep 17 00:00:00 2001
 From: Yousuk Seung <ysseung@google.com>
 Date: Wed, 23 May 2018 17:55:54 -0700
-Subject: [PATCH 09/18] net-tcp: add new ca opts flag TCP_CONG_WANTS_CE_EVENTS
+Subject: [PATCH 09/19] net-tcp: add new ca opts flag TCP_CONG_WANTS_CE_EVENTS
 
 Add a a new ca opts flag TCP_CONG_WANTS_CE_EVENTS that allows a
 congestion control module to receive CE events.
@@ -21,9 +21,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  net/ipv4/tcp_input.c |  4 ++--
  2 files changed, 15 insertions(+), 3 deletions(-)
 
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index ac883f6750a6..6546a5ce251b 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -1035,7 +1035,11 @@ enum tcp_ca_ack_event_flags {
+@@ -1120,7 +1120,11 @@ enum tcp_ca_ack_event_flags {
  #define TCP_CONG_NON_RESTRICTED 0x1
  /* Requires ECN/ECT set on all packets */
  #define TCP_CONG_NEEDS_ECN	0x2
@@ -36,7 +38,7 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  
  union tcp_cc_info;
  
-@@ -1167,6 +1171,14 @@ static inline char *tcp_ca_get_name_by_k
+@@ -1252,6 +1256,14 @@ static inline char *tcp_ca_get_name_by_key(u32 key, char *buffer)
  }
  #endif
  
@@ -51,9 +53,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  static inline bool tcp_ca_needs_ecn(const struct sock *sk)
  {
  	const struct inet_connection_sock *icsk = inet_csk(sk);
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index 98daade39fd5..b106097f115d 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -376,7 +376,7 @@ static void __tcp_ecn_check_ce(struct so
+@@ -370,7 +370,7 @@ static void __tcp_ecn_check_ce(struct sock *sk, const struct sk_buff *skb)
  			tcp_enter_quickack_mode(sk, 2);
  		break;
  	case INET_ECN_CE:
@@ -62,7 +66,7 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  			tcp_ca_event(sk, CA_EVENT_ECN_IS_CE);
  
  		if (!(tp->ecn_flags & TCP_ECN_DEMAND_CWR)) {
-@@ -387,7 +387,7 @@ static void __tcp_ecn_check_ce(struct so
+@@ -381,7 +381,7 @@ static void __tcp_ecn_check_ce(struct sock *sk, const struct sk_buff *skb)
  		tp->ecn_flags |= TCP_ECN_SEEN;
  		break;
  	default:
@@ -71,3 +75,6 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  			tcp_ca_event(sk, CA_EVENT_ECN_NO_CE);
  		tp->ecn_flags |= TCP_ECN_SEEN;
  		break;
+-- 
+2.45.2
+

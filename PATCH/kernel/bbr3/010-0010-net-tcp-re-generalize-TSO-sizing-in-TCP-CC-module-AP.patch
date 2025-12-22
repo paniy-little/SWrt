@@ -1,7 +1,7 @@
-From 6b5af62d421f11e6e1c0cdf2eb23a6f96bf7b310 Mon Sep 17 00:00:00 2001
+From 2c015b38804583667528b976c1cc9f9c1c42c104 Mon Sep 17 00:00:00 2001
 From: Neal Cardwell <ncardwell@google.com>
 Date: Fri, 27 Sep 2019 17:10:26 -0400
-Subject: [PATCH 10/18] net-tcp: re-generalize TSO sizing in TCP CC module API
+Subject: [PATCH 10/19] net-tcp: re-generalize TSO sizing in TCP CC module API
 
 Reorganize the API for CC modules so that the CC module once again
 gets complete control of the TSO sizing decision. This is how the API
@@ -25,9 +25,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  net/ipv4/tcp_output.c | 11 +++++------
  3 files changed, 33 insertions(+), 19 deletions(-)
 
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 6546a5ce251b..af47d2aaf3f4 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -1101,8 +1101,8 @@ struct tcp_congestion_ops {
+@@ -1186,8 +1186,8 @@ struct tcp_congestion_ops {
  	/* hook for packet ack accounting (optional) */
  	void (*pkts_acked)(struct sock *sk, const struct ack_sample *sample);
  
@@ -38,10 +40,12 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  
  	/* react to a specific lost skb (optional) */
  	void (*skb_marked_lost)(struct sock *sk, const struct sk_buff *skb);
+diff --git a/net/ipv4/tcp_bbr.c b/net/ipv4/tcp_bbr.c
+index 760941e55153..b9c6ef78f128 100644
 --- a/net/ipv4/tcp_bbr.c
 +++ b/net/ipv4/tcp_bbr.c
-@@ -300,20 +300,35 @@ __bpf_kfunc static u32 bbr_min_tso_segs(
- 	return sk->sk_pacing_rate < (bbr_min_tso_rate >> 3) ? 1 : 2;
+@@ -301,20 +301,35 @@ __bpf_kfunc static u32 bbr_min_tso_segs(struct sock *sk)
+ 	return READ_ONCE(sk->sk_pacing_rate) < (bbr_min_tso_rate >> 3) ? 1 : 2;
  }
  
 +/* Return the number of segments BBR would like in a TSO/GSO skb, given
@@ -54,7 +58,7 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
 +	u64 bytes;
 +
 +	/* Budget a TSO/GSO burst size allowance based on bw (pacing_rate). */
-+	bytes = sk->sk_pacing_rate >> sk->sk_pacing_shift;
++	bytes = READ_ONCE(sk->sk_pacing_rate) >> READ_ONCE(sk->sk_pacing_shift);
 +
 +	bytes = min_t(u32, bytes, gso_max_size - 1 - MAX_TCP_HEADER);
 +	segs = max_t(u32, bytes / mss_now, bbr_min_tso_segs(sk));
@@ -77,16 +81,16 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
 -	 * driver provided sk_gso_max_size.
 -	 */
 -	bytes = min_t(unsigned long,
--		      sk->sk_pacing_rate >> READ_ONCE(sk->sk_pacing_shift),
+-		      READ_ONCE(sk->sk_pacing_rate) >> READ_ONCE(sk->sk_pacing_shift),
 -		      GSO_LEGACY_MAX_SIZE - 1 - MAX_TCP_HEADER);
 -	segs = max_t(u32, bytes / tp->mss_cache, bbr_min_tso_segs(sk));
  
 -	return min(segs, 0x7FU);
-+	return  bbr_tso_segs_generic(sk, tp->mss_cache, GSO_MAX_SIZE);
++	return bbr_tso_segs_generic(sk, tp->mss_cache, GSO_MAX_SIZE);
  }
  
  /* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
-@@ -1149,7 +1164,7 @@ static struct tcp_congestion_ops tcp_bbr
+@@ -1150,7 +1165,7 @@ static struct tcp_congestion_ops tcp_bbr_cong_ops __read_mostly = {
  	.undo_cwnd	= bbr_undo_cwnd,
  	.cwnd_event	= bbr_cwnd_event,
  	.ssthresh	= bbr_ssthresh,
@@ -95,9 +99,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  	.get_info	= bbr_get_info,
  	.set_state	= bbr_set_state,
  };
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 4608bd8be3e1..00f177f90d39 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
-@@ -2022,13 +2022,12 @@ static u32 tcp_tso_autosize(const struct
+@@ -2057,13 +2057,12 @@ static u32 tcp_tso_autosize(const struct sock *sk, unsigned int mss_now,
  static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)
  {
  	const struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;
@@ -116,3 +122,6 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  	return min_t(u32, tso_segs, sk->sk_gso_max_segs);
  }
  
+-- 
+2.45.2
+

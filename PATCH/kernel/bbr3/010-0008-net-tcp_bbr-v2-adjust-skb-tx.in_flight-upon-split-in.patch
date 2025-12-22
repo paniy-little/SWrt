@@ -1,7 +1,7 @@
-From eb6b2dfa4d2aa75f05eabb8fdcbae4a94b9b5ba1 Mon Sep 17 00:00:00 2001
+From 6d0d550fdc6692ee65d01453d380ffba4b5a97e9 Mon Sep 17 00:00:00 2001
 From: Neal Cardwell <ncardwell@google.com>
 Date: Wed, 1 May 2019 20:16:25 -0400
-Subject: [PATCH 08/18] net-tcp_bbr: v2: adjust skb tx.in_flight upon split in
+Subject: [PATCH 08/19] net-tcp_bbr: v2: adjust skb tx.in_flight upon split in
  tcp_fragment()
 
 When we fragment an skb that has already been sent, we need to update
@@ -29,9 +29,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  net/ipv4/tcp_output.c | 26 +++++++++++++++++++++++++-
  2 files changed, 40 insertions(+), 1 deletion(-)
 
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 8de19466dc9b..ac883f6750a6 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -1199,6 +1199,21 @@ static inline bool tcp_skb_sent_after(u6
+@@ -1284,6 +1284,21 @@ static inline bool tcp_skb_sent_after(u64 t1, u64 t2, u32 seq1, u32 seq2)
  	return t1 > t2 || (t1 == t2 && after(seq1, seq2));
  }
  
@@ -53,9 +55,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  /* These functions determine how the current flow behaves in respect of SACK
   * handling. SACK is negotiated with the peer, and therefore it can vary
   * between different flows.
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index f994bf173117..4608bd8be3e1 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
-@@ -1548,7 +1548,7 @@ int tcp_fragment(struct sock *sk, enum t
+@@ -1601,7 +1601,7 @@ int tcp_fragment(struct sock *sk, enum tcp_queue tcp_queue,
  {
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct sk_buff *buff;
@@ -64,7 +68,7 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  	long limit;
  	int nlen;
  	u8 flags;
-@@ -1623,6 +1623,30 @@ int tcp_fragment(struct sock *sk, enum t
+@@ -1676,6 +1676,30 @@ int tcp_fragment(struct sock *sk, enum tcp_queue tcp_queue,
  
  		if (diff)
  			tcp_adjust_pcount(sk, skb, diff);
@@ -95,3 +99,6 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  	}
  
  	/* Link BUFF into the send queue. */
+-- 
+2.45.2
+

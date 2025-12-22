@@ -1,7 +1,7 @@
-From d884ab11ebb699e41bc201cba6b469d3b682a3b7 Mon Sep 17 00:00:00 2001
+From 8a87d0d851b9c06455a2def28fa8c2624ffa2e1a Mon Sep 17 00:00:00 2001
 From: Adithya Abraham Philip <abrahamphilip@google.com>
 Date: Fri, 11 Jun 2021 21:56:10 +0000
-Subject: [PATCH 17/18] net-tcp_bbr: v3: ensure ECN-enabled BBR flows set ECT
+Subject: [PATCH 17/19] net-tcp_bbr: v3: ensure ECN-enabled BBR flows set ECT
  on retransmits
 
 Adds a new flag TCP_ECN_ECT_PERMANENT that is used by CCAs to
@@ -23,9 +23,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  net/ipv4/tcp_output.c | 3 ++-
  3 files changed, 6 insertions(+), 1 deletion(-)
 
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 1ec7f48fe081..7e4a78f6a5a7 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -373,6 +373,7 @@ static inline void tcp_dec_quickack_mode
+@@ -376,6 +376,7 @@ static inline void tcp_dec_quickack_mode(struct sock *sk)
  #define	TCP_ECN_DEMAND_CWR	4
  #define	TCP_ECN_SEEN		8
  #define	TCP_ECN_LOW		16
@@ -33,9 +35,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  
  enum tcp_tw_status {
  	TCP_TW_SUCCESS = 0,
+diff --git a/net/ipv4/tcp_bbr.c b/net/ipv4/tcp_bbr.c
+index 1b4d32a4c766..a180fa648d5e 100644
 --- a/net/ipv4/tcp_bbr.c
 +++ b/net/ipv4/tcp_bbr.c
-@@ -2151,6 +2151,9 @@ __bpf_kfunc static void bbr_init(struct
+@@ -2151,6 +2151,9 @@ __bpf_kfunc static void bbr_init(struct sock *sk)
  	bbr->plb.pause_until = 0;
  
  	tp->fast_ack_mode = bbr_fast_ack_mode ? 1 : 0;
@@ -45,9 +49,11 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  }
  
  /* BBR marks the current round trip as a loss round. */
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index 37a3b2a903c3..afdb62febe42 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
-@@ -388,7 +388,8 @@ static void tcp_ecn_send(struct sock *sk
+@@ -390,7 +390,8 @@ static void tcp_ecn_send(struct sock *sk, struct sk_buff *skb,
  				th->cwr = 1;
  				skb_shinfo(skb)->gso_type |= SKB_GSO_TCP_ECN;
  			}
@@ -57,3 +63,6 @@ Signed-off-by: Alexandre Frade <kernel@xanmod.org>
  			/* ACK or retransmitted segment: clear ECT|CE */
  			INET_ECN_dontxmit(sk);
  		}
+-- 
+2.45.2
+
