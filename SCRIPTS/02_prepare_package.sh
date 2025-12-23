@@ -59,7 +59,7 @@ cp -rf ../PATCH/kernel/wg/* ./target/linux/generic/hack-6.12/
 # dont wrongly interpret first-time data
 echo "net.netfilter.nf_conntrack_tcp_max_retrans=5" >>./package/kernel/linux/files/sysctl-nf-conntrack.conf
 # OTHERS
-#cp -rf ../PATCH/kernel/others/* ./target/linux/generic/pending-6.12/
+cp -rf ../PATCH/kernel/others/* ./target/linux/generic/pending-6.12/
 # luci-app-attendedsysupgrade
 sed -i '/luci-app-attendedsysupgrade/d' feeds/luci/collections/luci-nginx/Makefile
 
