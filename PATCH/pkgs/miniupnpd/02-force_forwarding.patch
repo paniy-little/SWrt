@@ -27,9 +27,9 @@ index c5a14ab..5a0696f 100644
 --- a/net/miniupnpd/files/miniupnpd.init
 +++ b/net/miniupnpd/files/miniupnpd.init
 @@ -63,6 +63,7 @@ upnpd() {
+ 	local upload download log_output port config_file serial_number model_number
  	local use_stun stun_host stun_port uuid notify_interval presentation_url
- 	local upnp_lease_file clean_ruleset_threshold clean_ruleset_interval
- 	local ipv6_disable
+ 	local upnp_lease_file ipv6_disable
 +	local force_forwarding
  
  	local enabled
