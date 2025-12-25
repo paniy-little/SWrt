@@ -1,7 +1,7 @@
 From 0b5fb91507c6c0e1a90fd1a5c8764570e5b2f9c4 Mon Sep 17 00:00:00 2001
 From: Liangbin Lian <jjm2473@gmail.com>
 Date: Sun, 24 Apr 2022 13:58:06 +0800
-Subject: [PATCH] luci-app-upnp: support force_forwarding flag
+Subject: [PATCH] luci-app-upnp: support ext_allow_private_ipv4 flag
 
 ---
  .../htdocs/luci-static/resources/view/upnp/upnp.js          | 3 +++
@@ -17,7 +17,7 @@ index e0a326d4fcf4..f6b518437aa9 100644
  		o = s.taboption('advanced', form.Value, 'upnp_lease_file', _('Service lease file'));
  		o.placeholder = '/var/run/miniupnpd.leases';
  
-+		s.taboption('advanced', form.Flag, 'force_forwarding', _('Force Forwarding'),
++		s.taboption('advanced', form.Flag, 'ext_allow_private_ipv4', _('Force Forwarding'),
 +			_('Force forwarding even there is no public IP (please try STUN first)'))
 +
  		s = m.section(form.GridSection, 'perm_rule', _('Service Access Control List'),
