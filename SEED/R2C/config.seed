@@ -47,8 +47,8 @@ CONFIG_USE_LTO=y
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
 
 # RNGD
-CONFIG_PACKAGE_urandom-seed=y
-CONFIG_PACKAGE_urngd=y
+# CONFIG_PACKAGE_urandom-seed is not set
+# CONFIG_PACKAGE_urngd is not set
 
 ### BASIC ###
 CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
