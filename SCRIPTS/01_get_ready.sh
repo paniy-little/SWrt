@@ -65,12 +65,15 @@ clone_repo $docker_lib_repo master docker_lib &
 wait
 
 # 进行一些处理
-cp -rf openwrt/package/system/ca-certificates /tmp/ca-certificates.bak
+cp -rf openwrt/include/package-pack.mk /tmp/package-pack.mk.bak
+cp -rf openwrt/include/package.mk /tmp/package.mk.bak
+cp -rf openwrt/scripts/metadata.pm /tmp/metadata.pm.bak
 find openwrt/package/* -maxdepth 0 ! -name 'firmware' ! -name 'kernel' ! -name 'base-files' ! -name 'Makefile' -exec rm -rf {} +
 rm -rf ./openwrt_snap/package/firmware ./openwrt_snap/package/kernel ./openwrt_snap/package/base-files ./openwrt_snap/package/Makefile
 cp -rf ./openwrt_snap/package/* ./openwrt/package/
-rm -rf openwrt/package/system/ca-certificates
-mv /tmp/ca-certificates.bak openwrt/package/system/ca-certificates
+cp -rf ./tmp/package-pack.mk.bak ./openwrt/include/package-pack.mk
+cp -rf ./tmp/package.mk.bak ./openwrt/include/package.mk
+cp -rf ./tmp/metadata.pm.bak ./openwrt/scripts/metadata.pm
 cp -rf ./openwrt_snap/feeds.conf.default ./openwrt/feeds.conf.default
 
 # 退出脚本
