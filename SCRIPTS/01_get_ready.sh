@@ -72,10 +72,10 @@ cp -rf openwrt_snap/scripts/metadata.pm /tmp/metadata.pm.bak
 find openwrt/package/* -maxdepth 0 ! -name 'firmware' ! -name 'kernel' ! -name 'base-files' ! -name 'Makefile' -exec rm -rf {} +
 rm -rf ./openwrt_snap/package/firmware ./openwrt_snap/package/kernel ./openwrt_snap/package/base-files ./openwrt_snap/package/Makefile
 cp -rf ./openwrt_snap/package/* ./openwrt/package/
-cp -rf ./tmp/package-pack.mk.bak ./openwrt/include/package-pack.mk
-cp -rf ./tmp/package.mk.bak ./openwrt/include/package.mk
-cp -rf ./tmp/kernel.mk.bak ./openwrt/include/kernel.mk
-cp -rf ./tmp/metadata.pm.bak ./openwrt/scripts/metadata.pm
+cp -rf /tmp/package-pack.mk.bak ./openwrt/include/package-pack.mk
+cp -rf /tmp/package.mk.bak ./openwrt/include/package.mk
+cp -rf /tmp/kernel.mk.bak ./openwrt/include/kernel.mk
+cp -rf /tmp/metadata.pm.bak ./openwrt/scripts/metadata.pm
 cp -rf ./openwrt_snap/feeds.conf.default ./openwrt/feeds.conf.default
 
 # 退出脚本
