@@ -2,7 +2,7 @@ name: X86-OpenWrt-Self
 
 on:
   schedule:
-    - cron: '0 10 * * *'    # 每天北京时间 10:00
+    - cron: '38 0 * * *'    # 每天北京时间 10:00
   workflow_dispatch:
     inputs:
       upload_source:
