@@ -150,7 +150,7 @@ jobs:
         with:
           swap-size-mb: 1024
           temp-reserve-mb: 4608
-          root-reserve-mb: 4608
+          root-reserve-mb: 3584
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
