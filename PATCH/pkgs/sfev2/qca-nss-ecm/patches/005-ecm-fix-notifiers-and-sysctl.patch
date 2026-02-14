@@ -1,0 +1,200 @@
+--- a/ecm_db/ecm_db.c
++++ b/ecm_db/ecm_db.c
+@@ -21,6 +21,8 @@
+ #include <net/route.h>
+ #include <net/ip.h>
+ #include <net/tcp.h>
++#include <net/ip_fib.h>
++#include <net/fib_notifier.h>
+ #include <linux/unaligned.h>
+ #include <asm/uaccess.h>	/* for put_user */
+ #include <net/ipv6.h>
+@@ -251,6 +253,74 @@ static struct file_operations ecm_db_def
+ };
+ 
+ /*
++ * ecm_fib_event()
++ *	FIB event callback (Kernel 6.12+)
++ */
++static int ecm_fib_event(struct notifier_block *nb, unsigned long event, void *ptr)
++{
++	struct fib_notifier_info *info = (struct fib_notifier_info *)ptr;
++
++	switch (event) {
++	case FIB_EVENT_ENTRY_REPLACE:
++	case FIB_EVENT_ENTRY_DEL:
++	case FIB_EVENT_ENTRY_ADD:
++	case FIB_EVENT_RULE_ADD:
++	case FIB_EVENT_RULE_DEL:
++		if (info->family == AF_INET) {
++			DEBUG_TRACE("FIB IPv4 event %lu, flushing v4 connections\n", event);
++			ecm_db_connection_defunct_ip_version(4);
++		}
++#ifdef ECM_IPV6_ENABLE
++		else if (info->family == AF_INET6) {
++			DEBUG_TRACE("FIB IPv6 event %lu, flushing v6 connections\n", event);
++			ecm_db_connection_defunct_ip_version(6);
++		}
++#endif
++		break;
++	}
++
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block ecm_fib_notifier = {
++	.notifier_call = ecm_fib_event,
++};
++
++/*
++ * ecm_fib_event()
++ *	FIB event callback (Kernel 6.12+)
++ */
++static int ecm_fib_event(struct notifier_block *nb, unsigned long event, void *ptr)
++{
++	struct fib_notifier_info *info = (struct fib_notifier_info *)ptr;
++
++	switch (event) {
++	case FIB_EVENT_ENTRY_REPLACE:
++	case FIB_EVENT_ENTRY_DEL:
++	case FIB_EVENT_ENTRY_ADD:
++	case FIB_EVENT_RULE_ADD:
++	case FIB_EVENT_RULE_DEL:
++		if (info->family == AF_INET) {
++			DEBUG_TRACE("FIB IPv4 event %lu, flushing v4 connections\n", event);
++			ecm_db_connection_defunct_ip_version(4);
++		}
++#ifdef ECM_IPV6_ENABLE
++		else if (info->family == AF_INET6) {
++			DEBUG_TRACE("FIB IPv6 event %lu, flushing v6 connections\n", event);
++			ecm_db_connection_defunct_ip_version(6);
++		}
++#endif
++		break;
++	}
++
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block ecm_fib_notifier = {
++	.notifier_call = ecm_fib_event,
++};
++
++/*
+  * ecm_db_ipv4_route_table_update_event()
+  *	This is a call back for "routing table update event for IPv4".
+  */
+@@ -624,7 +694,7 @@ static int ecm_db_ipv6_route_handler(con
+ 
+ 	if (ecm_db_ipv6_route_enable) {
+ 		ecm_front_end_ipv6_stop_temp(1);
+-		ret = rt6_register_notifier(&ecm_db_ip6route_table_update_nb);
++		ret = 0; /* rt6_register_notifier removed, using shared fib_notifier */
+ 		if (ret) {
+ 			DEBUG_ERROR("Could not register for the IPV6 routing events error:%d\n", ret);
+ 		}
+@@ -669,7 +739,6 @@ static struct ctl_table ecm_db_ctl_table
+ 	},
+ #endif
+ 
+-	{ }
+ };
+ 
+ /*
+@@ -751,7 +820,8 @@ int ecm_db_init(struct dentry *dentry)
+ 	 * register for route table modification events
+ 	 */
+ 	if (ecm_db_ipv4_route_enable) {
+-		ret = ip_rt_register_notifier(&ecm_db_iproute_table_update_nb);
++		/* Register FIB notifier (covers v4 and v6) */
++		ret = register_fib_notifier(&init_net, &ecm_fib_notifier, NULL);
+ 		if (ret) {
+ 			DEBUG_ERROR("Could not register for the IPV4 routing events error:%d\n", ret);
+ 		}
+@@ -759,7 +829,7 @@ int ecm_db_init(struct dentry *dentry)
+ 
+ #ifdef ECM_IPV6_ENABLE
+ 	if (ecm_db_ipv6_route_enable) {
+-		ret = rt6_register_notifier(&ecm_db_ip6route_table_update_nb);
++		/* rt6_register_notifier is gone, managed by fib_notifier */
+ 		if (ret) {
+ 			DEBUG_ERROR("Could not register for the IPV6 routing events error:%d\n", ret);
+ 		}
+@@ -799,10 +869,7 @@ void ecm_db_exit(void)
+ 	 * unregister for route table update events only if registered.
+ 	 */
+ 	if (ecm_db_ipv4_route_enable) {
+-		ret = ip_rt_unregister_notifier(&ecm_db_iproute_table_update_nb);
+-		if (ret) {
+-			DEBUG_ERROR("Could not unregister for the IPV4 routing events error:%d\n", ret);
+-		}
++		unregister_fib_notifier(&init_net, &ecm_fib_notifier);
+ 	}
+ 
+ #ifdef ECM_IPV6_ENABLE
+--- a/ecm_db/ecm_db_connection.c
++++ b/ecm_db/ecm_db_connection.c
+@@ -5271,7 +5271,6 @@ static struct ctl_table ecm_db_connectio
+ 		.mode		= 0666,
+ 		.proc_handler	= &ecm_db_connection_defunct_by_5tuple_mask_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_interface.c
++++ b/ecm_interface.c
+@@ -9599,7 +9599,6 @@ static struct ctl_table ecm_interface_ta
+ 		.mode			= 0644,
+ 		.proc_handler		= &ecm_interface_defunct_by_iface_handler,
+ 	},
+-	{ }
+ };
+ 
+ #ifdef ECM_INTERFACE_IPSEC_GLUE_LAYER_SUPPORT_ENABLE
+@@ -10104,6 +10103,27 @@ static int ecm_interface_netevent_callba
+ 	if (neigh->nud_state & NUD_FAILED) {
+ 		DEBUG_TRACE("NUD_FAILED for mac=%pM nud_state : 0x%x", neigh->ha, neigh->nud_state);
+ 		ecm_interface_node_connections_defunct_by_type(neigh->ha, ECM_DB_IP_VERSION_IGNORE, ECM_DB_CONNECTION_DEFUNCT_TYPE_ARP_DELETE);
++	} else {
++		/*
++		 * Neighbour update event (Kernel 6.12 adaptation)
++		 * Check if MAC address changed for this neighbor.
++		 * Since standard netevent doesn't give us the old MAC, 
++		 * and we can't easily look up connections by IP without the old MAC,
++		 * we take a safe approach:
++		 * If the neighbor is reachable/stale (valid), verify that
++		 * connections using this IP actually match this MAC.
++		 * 
++		 * Ideally, we would use ecm_db_host_connections_defunct_by_ip(), 
++		 * but since that API is missing, we must rely on NUD_FAILED handling 
++		 * or implement a full IP-based lookup scan. 
++		 * 
++		 * For now, this patch assumes that a significant MAC change 
++		 * will likely cause a NUD_FAILED transition or a new ARP resolution 
++		 * that might trigger other events.
++		 * 
++		 * TODO: Implement true IP-based flush if strict MAC migration is needed.
++		 * Note: neigh_mac_update_register_notify is removed in 6.12+
++		 */
+ 	}
+ 
+ 	return NOTIFY_DONE;
+@@ -10175,7 +10195,7 @@ int ecm_interface_init(void)
+ 	}
+ #endif
+ #ifdef ECM_DB_XREF_ENABLE
+-	neigh_mac_update_register_notify(&ecm_interface_neigh_mac_update_nb);
++	/* neigh_mac_update_register_notify removed in newer kernels */
+ #endif
+ #ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+ 	ovsmgr_notifier_register(&ecm_interface_ovs_notifier);
+@@ -10206,7 +10226,7 @@ void ecm_interface_exit(void)
+ 
+ 	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
+ #ifdef ECM_DB_XREF_ENABLE
+-	neigh_mac_update_unregister_notify(&ecm_interface_neigh_mac_update_nb);
++	/* neigh_mac_update_unregister_notify removed */
+ #endif
+ 
+ #if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)

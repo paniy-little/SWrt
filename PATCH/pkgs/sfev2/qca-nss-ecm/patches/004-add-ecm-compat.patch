@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/ecm_compat.h
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,172 @@
 +#ifndef __ECM_COMPAT_H
 +#define __ECM_COMPAT_H
 +
@@ -97,13 +97,6 @@
 +#define IPPROTO_ETHERIP 97
 +#endif
 +
-+/* Route Notifier Compat - QCA-specific notifiers (not in vanilla kernel) */
-+/* Stub to 0 (Success) */
-+#define ip_rt_register_notifier(nb) (0)
-+#define ip_rt_unregister_notifier(nb) (0)
-+#define rt6_register_notifier(nb) (0)
-+#define rt6_unregister_notifier(nb) (0)
-+
 +/* NOTE: register_netdevice_notifier / unregister_netdevice_notifier are
 + * standard kernel APIs (EXPORT_SYMBOL in net/core/dev.c). Do NOT stub them.
 + * ECM needs them to react to interface UP/DOWN/address changes.
@@ -156,12 +149,11 @@
 +#define ip_route_output(net, daddr, saddr, tos, oif) ecm_compat_ip_route_output(net, daddr, saddr, tos, oif)
 +
 +/* Neigh Mac Update Compat - QCA Specific */
++/* Struct definition required for dead code compatibility in ecm_interface.c */
 +struct neigh_mac_update {
 +       unsigned char old_mac[ETH_ALEN];
 +       unsigned char update_mac[ETH_ALEN];
 +};
-+#define neigh_mac_update_register_notify(nb) (0)
-+#define neigh_mac_update_unregister_notify(nb) (0)
 +
 +/* UDP Timeouts Compat */
 +/* 
