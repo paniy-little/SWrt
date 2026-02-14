@@ -146,7 +146,7 @@ jobs:
 
       - name: Maximize build space
         if: inputs.build_firmware
-        uses: easimon/maximize-build-space@master
+        uses: smallprogram/maximize-build-space@master
         with:
           swap-size-mb: 1024
           temp-reserve-mb: 4608
