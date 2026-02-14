@@ -25,7 +25,6 @@ define KernelPackage/qca-nss-sfe
 	   CONFIG_NF_CONNTRACK_TIMEOUT=y \
 	   CONFIG_SHORTCUT_FE=y \
 	   CONFIG_XFRM=y
-  AUTOLOAD:=$(call AutoProbe,qca-nss-sfe)
 endef
 
 define KernelPackage/qca-nss-sfe/description

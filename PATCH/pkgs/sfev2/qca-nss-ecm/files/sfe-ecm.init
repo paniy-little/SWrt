@@ -32,6 +32,8 @@ sfe_enabled() {
 start_service() {
 	if sfe_enabled; then
 		logger -t sfe-ecm "SFE v2 + ECM acceleration: enabling"
+		rmmod shortcut-fe 2>/dev/null
+		rmmod shortcut-fe-ipv6 2>/dev/null
 		modprobe qca-nss-sfe 2>/dev/null
 		modprobe ecm 2>/dev/null
 	fi
