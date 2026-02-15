@@ -308,6 +308,16 @@
  };
  
  /*
+--- a/ecm_tracker_udp.c
++++ b/ecm_tracker_udp.c
+@@ -1219,7 +1219,6 @@ static struct ctl_table ecm_tracker_udp_
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_tracker_udp_rtp_payload_types_handler,
+ 	},
+-	{}
+ };
+ 
+ /*
 --- a/examples/ecm_ae_select.c
 +++ b/examples/ecm_ae_select.c
 @@ -701,7 +701,6 @@ static struct ctl_table ecm_ae_select_te
@@ -358,6 +368,16 @@
  };
  
  void ecm_bond_notifier_stop(int num)
+--- a/frontends/ecm_front_end_common.c
++++ b/frontends/ecm_front_end_common.c
+@@ -1254,7 +1254,6 @@ static struct ctl_table ecm_front_end_sy
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_front_end_tcp_denied_ports_handler,
+ 	},
+-	{}
+ };
+ 
+ /*
 --- a/frontends/ecm_front_end_ipv4.c
 +++ b/frontends/ecm_front_end_ipv4.c
 @@ -152,7 +152,6 @@ static struct ctl_table ecm_front_end_ip
@@ -395,6 +415,16 @@
  		.proc_handler	= &ecm_ppe_ipv6_vlan_passthrough_enable_handler,
  	},
 -	{ }
+ };
+ 
+ /*
+--- a/frontends/sfe/ecm_sfe_common.c
++++ b/frontends/sfe/ecm_sfe_common.c
+@@ -528,7 +528,6 @@ static struct ctl_table ecm_sfe_sysctl_t
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_sfe_tun_fast_xmit_enable_handler,
+ 	},
+-	{}
  };
  
  /*
