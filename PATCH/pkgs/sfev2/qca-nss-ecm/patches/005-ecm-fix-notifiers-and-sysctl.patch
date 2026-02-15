@@ -1,3 +1,93 @@
+--- a/ecm_classifier_default.c
++++ b/ecm_classifier_default.c
+@@ -819,7 +819,6 @@ static struct ctl_table ecm_classifier_d
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_accel_delay_pkts_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_dscp.c
++++ b/ecm_classifier_dscp.c
+@@ -945,7 +945,6 @@ static struct ctl_table ecm_classifier_d
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_dscp_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_emesh.c
++++ b/ecm_classifier_emesh.c
+@@ -4377,7 +4377,6 @@ static struct ctl_table ecm_classifier_e
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_sawf_emesh_udp_ipsec_port_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_mark.c
++++ b/ecm_classifier_mark.c
+@@ -676,7 +676,6 @@ static struct ctl_table ecm_classifier_m
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_mark_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_mscs.c
++++ b/ecm_classifier_mscs.c
+@@ -1420,7 +1420,6 @@ static struct ctl_table ecm_classifier_m
+ 		.proc_handler	= &ecm_classifier_mscs_scs_udp_ipsec_port_handler,
+ 	},
+ #endif
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_ovs.c
++++ b/ecm_classifier_ovs.c
+@@ -2231,7 +2231,6 @@ static struct ctl_table ecm_classifier_o
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_ovs_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_pcc.c
++++ b/ecm_classifier_pcc.c
+@@ -1367,7 +1367,6 @@ static struct ctl_table ecm_classifier_p
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_pcc_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_classifier_wifi.c
++++ b/ecm_classifier_wifi.c
+@@ -722,7 +722,6 @@ static struct ctl_table ecm_classifier_w
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_classifier_wifi_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/ecm_conntrack_notifier.c
++++ b/ecm_conntrack_notifier.c
+@@ -450,7 +450,6 @@ static struct ctl_table ecm_conntrack_no
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_conntrack_notifier_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
 --- a/ecm_db/ecm_db.c
 +++ b/ecm_db/ecm_db.c
 @@ -21,6 +21,8 @@
@@ -9,7 +99,7 @@
  #include <linux/unaligned.h>
  #include <asm/uaccess.h>	/* for put_user */
  #include <net/ipv6.h>
-@@ -251,6 +253,74 @@ static struct file_operations ecm_db_def
+@@ -251,6 +253,42 @@ static struct file_operations ecm_db_def
  };
  
  /*
@@ -46,45 +136,34 @@
 +	.notifier_call = ecm_fib_event,
 +};
 +
-+/*
-+ * ecm_fib_event()
-+ *	FIB event callback (Kernel 6.12+)
-+ */
-+static int ecm_fib_event(struct notifier_block *nb, unsigned long event, void *ptr)
-+{
-+	struct fib_notifier_info *info = (struct fib_notifier_info *)ptr;
 +
-+	switch (event) {
-+	case FIB_EVENT_ENTRY_REPLACE:
-+	case FIB_EVENT_ENTRY_DEL:
-+	case FIB_EVENT_ENTRY_ADD:
-+	case FIB_EVENT_RULE_ADD:
-+	case FIB_EVENT_RULE_DEL:
-+		if (info->family == AF_INET) {
-+			DEBUG_TRACE("FIB IPv4 event %lu, flushing v4 connections\n", event);
-+			ecm_db_connection_defunct_ip_version(4);
-+		}
-+#ifdef ECM_IPV6_ENABLE
-+		else if (info->family == AF_INET6) {
-+			DEBUG_TRACE("FIB IPv6 event %lu, flushing v6 connections\n", event);
-+			ecm_db_connection_defunct_ip_version(6);
-+		}
-+#endif
-+		break;
-+	}
-+
-+	return NOTIFY_DONE;
-+}
-+
-+static struct notifier_block ecm_fib_notifier = {
-+	.notifier_call = ecm_fib_event,
-+};
 +
 +/*
   * ecm_db_ipv4_route_table_update_event()
   *	This is a call back for "routing table update event for IPv4".
   */
-@@ -624,7 +694,7 @@ static int ecm_db_ipv6_route_handler(con
+@@ -563,7 +601,7 @@ static int ecm_db_ipv4_route_handler(con
+ 
+ 	if (ecm_db_ipv4_route_enable) {
+ 		ecm_front_end_ipv4_stop_temp(1);
+-		ret = ip_rt_register_notifier(&ecm_db_iproute_table_update_nb);
++		ret = register_fib_notifier(&init_net, &ecm_fib_notifier, NULL, NULL);
+ 		if (ret) {
+ 			DEBUG_ERROR("Could not register for the IPV4 routing events error:%d\n", ret);
+ 		}
+@@ -572,10 +610,7 @@ static int ecm_db_ipv4_route_handler(con
+ 	}
+ 
+ 	ecm_front_end_ipv4_stop_temp(1);
+-	ret = ip_rt_unregister_notifier(&ecm_db_iproute_table_update_nb);
+-	if (ret) {
+-		DEBUG_ERROR("Could not unregister for the IPV4 routing events error:%d\n", ret);
+-	}
++	unregister_fib_notifier(&init_net, &ecm_fib_notifier);
+ 	ecm_front_end_ipv4_stop_temp(0);
+ 
+ 	return ret;
+@@ -624,7 +659,7 @@ static int ecm_db_ipv6_route_handler(con
  
  	if (ecm_db_ipv6_route_enable) {
  		ecm_front_end_ipv6_stop_temp(1);
@@ -93,7 +172,19 @@
  		if (ret) {
  			DEBUG_ERROR("Could not register for the IPV6 routing events error:%d\n", ret);
  		}
-@@ -669,7 +739,6 @@ static struct ctl_table ecm_db_ctl_table
+@@ -633,10 +668,7 @@ static int ecm_db_ipv6_route_handler(con
+ 	}
+ 
+ 	ecm_front_end_ipv6_stop_temp(1);
+-	ret = rt6_unregister_notifier(&ecm_db_ip6route_table_update_nb);
+-	if (ret) {
+-		DEBUG_ERROR("Could not unregister for the IPV6 routing events error:%d\n", ret);
+-	}
++	/* rt6_unregister_notifier removed, managed by fib_notifier */
+ 	ecm_front_end_ipv6_stop_temp(0);
+ 
+ 	return ret;
+@@ -669,7 +701,6 @@ static struct ctl_table ecm_db_ctl_table
  	},
  #endif
  
@@ -101,17 +192,17 @@
  };
  
  /*
-@@ -751,7 +820,8 @@ int ecm_db_init(struct dentry *dentry)
+@@ -751,7 +782,8 @@ int ecm_db_init(struct dentry *dentry)
  	 * register for route table modification events
  	 */
  	if (ecm_db_ipv4_route_enable) {
 -		ret = ip_rt_register_notifier(&ecm_db_iproute_table_update_nb);
 +		/* Register FIB notifier (covers v4 and v6) */
-+		ret = register_fib_notifier(&init_net, &ecm_fib_notifier, NULL);
++		ret = register_fib_notifier(&init_net, &ecm_fib_notifier, NULL, NULL);
  		if (ret) {
  			DEBUG_ERROR("Could not register for the IPV4 routing events error:%d\n", ret);
  		}
-@@ -759,7 +829,7 @@ int ecm_db_init(struct dentry *dentry)
+@@ -759,7 +791,7 @@ int ecm_db_init(struct dentry *dentry)
  
  #ifdef ECM_IPV6_ENABLE
  	if (ecm_db_ipv6_route_enable) {
@@ -120,7 +211,7 @@
  		if (ret) {
  			DEBUG_ERROR("Could not register for the IPV6 routing events error:%d\n", ret);
  		}
-@@ -799,10 +869,7 @@ void ecm_db_exit(void)
+@@ -799,18 +831,12 @@ void ecm_db_exit(void)
  	 * unregister for route table update events only if registered.
  	 */
  	if (ecm_db_ipv4_route_enable) {
@@ -132,6 +223,15 @@
  	}
  
  #ifdef ECM_IPV6_ENABLE
+ 	if (ecm_db_ipv6_route_enable) {
+-		ret = rt6_unregister_notifier(&ecm_db_ip6route_table_update_nb);
+-		if (ret) {
+-			DEBUG_ERROR("Could not unregister for the IPV6 routing events error:%d\n", ret);
+-		}
++		/* managed by fib_notifier */
+ 	}
+ #endif
+ 	ecm_db_connection_defunct_all();
 --- a/ecm_db/ecm_db_connection.c
 +++ b/ecm_db/ecm_db_connection.c
 @@ -5271,7 +5271,6 @@ static struct ctl_table ecm_db_connectio
@@ -198,3 +298,143 @@
  #endif
  
  #if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
+--- a/ecm_state.c
++++ b/ecm_state.c
+@@ -972,7 +972,6 @@ static struct ctl_table ecm_state_ctl_ta
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_state_file_output_mask_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/examples/ecm_ae_select.c
++++ b/examples/ecm_ae_select.c
+@@ -701,7 +701,6 @@ static struct ctl_table ecm_ae_select_te
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_ae_select_test_rule_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/examples/ecm_pcc_test.c
++++ b/examples/ecm_pcc_test.c
+@@ -1559,7 +1559,6 @@ static struct ctl_table ecm_pcc_test_ctl
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_pcc_test_pcc_mirror_en_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/examples/ecm_sdx_pcc.c
++++ b/examples/ecm_sdx_pcc.c
+@@ -936,7 +936,6 @@ static struct ctl_table ecm_sdx_pcc_sysc
+ 		.mode			= 0644,
+ 		.proc_handler		= &ecm_sdx_pcc_unregister_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/examples/ecm_sfe_l2.c
++++ b/examples/ecm_sfe_l2.c
+@@ -1211,7 +1211,6 @@ static struct ctl_table ecm_sfe_l2_ctl_t
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_sfe_l2_defunct_by_port_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/cmn/ecm_bond_notifier.c
++++ b/frontends/cmn/ecm_bond_notifier.c
+@@ -270,7 +270,6 @@ static struct ctl_table ecm_bond_notifie
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_bond_notifier_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ void ecm_bond_notifier_stop(int num)
+--- a/frontends/ecm_front_end_ipv4.c
++++ b/frontends/ecm_front_end_ipv4.c
+@@ -152,7 +152,6 @@ static struct ctl_table ecm_front_end_ip
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_front_end_ipv4_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/ecm_front_end_ipv6.c
++++ b/frontends/ecm_front_end_ipv6.c
+@@ -153,7 +153,6 @@ static struct ctl_table ecm_front_end_ip
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_front_end_ipv6_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/ppe/ecm_ppe_ipv4.c
++++ b/frontends/ppe/ecm_ppe_ipv4.c
+@@ -998,7 +998,6 @@ static struct ctl_table ecm_ppe_ipv4_ctl
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_ppe_ipv4_vlan_passthrough_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/ppe/ecm_ppe_ipv6.c
++++ b/frontends/ppe/ecm_ppe_ipv6.c
+@@ -1056,7 +1056,6 @@ static struct ctl_table ecm_ppe_ipv6_ctl
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_ppe_ipv6_vlan_passthrough_enable_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/sfe/ecm_sfe_ipv4.c
++++ b/frontends/sfe/ecm_sfe_ipv4.c
+@@ -1143,7 +1143,6 @@ static struct ctl_table ecm_sfe_ipv4_ctl
+ 		.proc_handler	= &ecm_sfe_ipv4_reject_acceleration_for_ipsec_handler,
+ 	},
+ #endif
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/sfe/ecm_sfe_ipv6.c
++++ b/frontends/sfe/ecm_sfe_ipv6.c
+@@ -1142,7 +1142,6 @@ static struct ctl_table ecm_sfe_ipv6_ctl
+ 		.proc_handler	= &ecm_sfe_ipv6_reject_acceleration_for_ipsec_handler,
+ 	},
+ #endif
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/sfe/ecm_sfe_multicast_ipv4.c
++++ b/frontends/sfe/ecm_sfe_multicast_ipv4.c
+@@ -3227,7 +3227,6 @@ static struct ctl_table ecm_sfe_multicas
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_front_end_ipv4_mc_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
+--- a/frontends/sfe/ecm_sfe_multicast_ipv6.c
++++ b/frontends/sfe/ecm_sfe_multicast_ipv6.c
+@@ -3220,7 +3220,6 @@ static struct ctl_table ecm_sfe_multicas
+ 		.mode		= 0644,
+ 		.proc_handler	= &ecm_front_end_ipv6_mc_stop_handler,
+ 	},
+-	{ }
+ };
+ 
+ /*
