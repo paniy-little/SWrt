@@ -163,7 +163,7 @@
  	{
  		.procname	= "udp_classification_enabled",
  		.data		= &ecm_tracker_udp_clf_enabled,
-@@ -1307,7 +1307,7 @@ EXPORT_SYMBOL(ecm_tracker_udp_alloc);
+@@ -1308,7 +1308,7 @@ EXPORT_SYMBOL(ecm_tracker_udp_alloc);
   */
  void ecm_tracker_udp_sysctl_register(void)
  {
@@ -238,7 +238,7 @@
  	{
  		.procname	= "front_end_conn_limit",
  		.data		= &ecm_front_end_conn_limit,
-@@ -1265,7 +1265,7 @@ void ecm_front_end_common_sysctl_registe
+@@ -1266,7 +1266,7 @@ void ecm_front_end_common_sysctl_registe
  	/*
  	 * Register sysctl table.
  	 */
@@ -302,7 +302,7 @@
  	{
  		.procname	= "sfe_fast_xmit_enable",
  		.data		= &ecm_sfe_fast_xmit_enable,
-@@ -536,7 +536,7 @@ static struct ctl_table ecm_sfe_sysctl_t
+@@ -537,7 +537,7 @@ static struct ctl_table ecm_sfe_sysctl_t
   */
  int ecm_sfe_sysctl_tbl_init(void)
  {

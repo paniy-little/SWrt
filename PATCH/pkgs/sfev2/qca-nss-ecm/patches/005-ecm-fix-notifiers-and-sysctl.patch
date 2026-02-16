@@ -1,93 +1,3 @@
---- a/ecm_classifier_default.c
-+++ b/ecm_classifier_default.c
-@@ -819,7 +819,6 @@ static struct ctl_table ecm_classifier_d
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_accel_delay_pkts_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_dscp.c
-+++ b/ecm_classifier_dscp.c
-@@ -945,7 +945,6 @@ static struct ctl_table ecm_classifier_d
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_dscp_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_emesh.c
-+++ b/ecm_classifier_emesh.c
-@@ -4377,7 +4377,6 @@ static struct ctl_table ecm_classifier_e
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_sawf_emesh_udp_ipsec_port_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_mark.c
-+++ b/ecm_classifier_mark.c
-@@ -676,7 +676,6 @@ static struct ctl_table ecm_classifier_m
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_mark_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_mscs.c
-+++ b/ecm_classifier_mscs.c
-@@ -1420,7 +1420,6 @@ static struct ctl_table ecm_classifier_m
- 		.proc_handler	= &ecm_classifier_mscs_scs_udp_ipsec_port_handler,
- 	},
- #endif
--	{ }
- };
- 
- /*
---- a/ecm_classifier_ovs.c
-+++ b/ecm_classifier_ovs.c
-@@ -2231,7 +2231,6 @@ static struct ctl_table ecm_classifier_o
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_ovs_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_pcc.c
-+++ b/ecm_classifier_pcc.c
-@@ -1367,7 +1367,6 @@ static struct ctl_table ecm_classifier_p
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_pcc_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_classifier_wifi.c
-+++ b/ecm_classifier_wifi.c
-@@ -722,7 +722,6 @@ static struct ctl_table ecm_classifier_w
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_classifier_wifi_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/ecm_conntrack_notifier.c
-+++ b/ecm_conntrack_notifier.c
-@@ -450,7 +450,6 @@ static struct ctl_table ecm_conntrack_no
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_conntrack_notifier_stop_handler,
- 	},
--	{ }
- };
- 
- /*
 --- a/ecm_db/ecm_db.c
 +++ b/ecm_db/ecm_db.c
 @@ -21,6 +21,8 @@
@@ -184,15 +94,7 @@
  	ecm_front_end_ipv6_stop_temp(0);
  
  	return ret;
-@@ -669,7 +701,6 @@ static struct ctl_table ecm_db_ctl_table
- 	},
- #endif
- 
--	{ }
- };
- 
- /*
-@@ -751,7 +782,8 @@ int ecm_db_init(struct dentry *dentry)
+@@ -751,7 +783,8 @@ int ecm_db_init(struct dentry *dentry)
  	 * register for route table modification events
  	 */
  	if (ecm_db_ipv4_route_enable) {
@@ -202,7 +104,7 @@
  		if (ret) {
  			DEBUG_ERROR("Could not register for the IPV4 routing events error:%d\n", ret);
  		}
-@@ -759,7 +791,7 @@ int ecm_db_init(struct dentry *dentry)
+@@ -759,7 +792,7 @@ int ecm_db_init(struct dentry *dentry)
  
  #ifdef ECM_IPV6_ENABLE
  	if (ecm_db_ipv6_route_enable) {
@@ -211,7 +113,7 @@
  		if (ret) {
  			DEBUG_ERROR("Could not register for the IPV6 routing events error:%d\n", ret);
  		}
-@@ -799,18 +831,12 @@ void ecm_db_exit(void)
+@@ -799,18 +832,12 @@ void ecm_db_exit(void)
  	 * unregister for route table update events only if registered.
  	 */
  	if (ecm_db_ipv4_route_enable) {
@@ -232,27 +134,9 @@
  	}
  #endif
  	ecm_db_connection_defunct_all();
---- a/ecm_db/ecm_db_connection.c
-+++ b/ecm_db/ecm_db_connection.c
-@@ -5271,7 +5271,6 @@ static struct ctl_table ecm_db_connectio
- 		.mode		= 0666,
- 		.proc_handler	= &ecm_db_connection_defunct_by_5tuple_mask_handler,
- 	},
--	{ }
- };
- 
- /*
 --- a/ecm_interface.c
 +++ b/ecm_interface.c
-@@ -9599,7 +9599,6 @@ static struct ctl_table ecm_interface_ta
- 		.mode			= 0644,
- 		.proc_handler		= &ecm_interface_defunct_by_iface_handler,
- 	},
--	{ }
- };
- 
- #ifdef ECM_INTERFACE_IPSEC_GLUE_LAYER_SUPPORT_ENABLE
-@@ -10104,6 +10103,27 @@ static int ecm_interface_netevent_callba
+@@ -10104,6 +10104,27 @@ static int ecm_interface_netevent_callba
  	if (neigh->nud_state & NUD_FAILED) {
  		DEBUG_TRACE("NUD_FAILED for mac=%pM nud_state : 0x%x", neigh->ha, neigh->nud_state);
  		ecm_interface_node_connections_defunct_by_type(neigh->ha, ECM_DB_IP_VERSION_IGNORE, ECM_DB_CONNECTION_DEFUNCT_TYPE_ARP_DELETE);
@@ -280,7 +164,7 @@
  	}
  
  	return NOTIFY_DONE;
-@@ -10175,7 +10195,7 @@ int ecm_interface_init(void)
+@@ -10175,7 +10196,7 @@ int ecm_interface_init(void)
  	}
  #endif
  #ifdef ECM_DB_XREF_ENABLE
@@ -289,7 +173,7 @@
  #endif
  #ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
  	ovsmgr_notifier_register(&ecm_interface_ovs_notifier);
-@@ -10206,7 +10226,7 @@ void ecm_interface_exit(void)
+@@ -10206,7 +10227,7 @@ void ecm_interface_exit(void)
  
  	unregister_netdevice_notifier(&ecm_interface_netdev_notifier);
  #ifdef ECM_DB_XREF_ENABLE
@@ -298,173 +182,17 @@
  #endif
  
  #if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
---- a/ecm_state.c
-+++ b/ecm_state.c
-@@ -972,7 +972,6 @@ static struct ctl_table ecm_state_ctl_ta
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_state_file_output_mask_handler,
- 	},
--	{ }
- };
+--- a/ecm_types.h
++++ b/ecm_types.h
+@@ -11,6 +11,11 @@
+ #include <linux/printk.h>
+ #include <linux/debugfs.h>
  
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
++#undef register_sysctl
++#define register_sysctl(path, table) register_sysctl_sz(path, table, ARRAY_SIZE(table) - 1)
++#endif
++
  /*
---- a/ecm_tracker_udp.c
-+++ b/ecm_tracker_udp.c
-@@ -1219,7 +1219,6 @@ static struct ctl_table ecm_tracker_udp_
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_tracker_udp_rtp_payload_types_handler,
- 	},
--	{}
- };
- 
- /*
---- a/examples/ecm_ae_select.c
-+++ b/examples/ecm_ae_select.c
-@@ -701,7 +701,6 @@ static struct ctl_table ecm_ae_select_te
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_ae_select_test_rule_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/examples/ecm_pcc_test.c
-+++ b/examples/ecm_pcc_test.c
-@@ -1559,7 +1559,6 @@ static struct ctl_table ecm_pcc_test_ctl
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_pcc_test_pcc_mirror_en_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/examples/ecm_sdx_pcc.c
-+++ b/examples/ecm_sdx_pcc.c
-@@ -936,7 +936,6 @@ static struct ctl_table ecm_sdx_pcc_sysc
- 		.mode			= 0644,
- 		.proc_handler		= &ecm_sdx_pcc_unregister_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/examples/ecm_sfe_l2.c
-+++ b/examples/ecm_sfe_l2.c
-@@ -1211,7 +1211,6 @@ static struct ctl_table ecm_sfe_l2_ctl_t
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_sfe_l2_defunct_by_port_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/cmn/ecm_bond_notifier.c
-+++ b/frontends/cmn/ecm_bond_notifier.c
-@@ -270,7 +270,6 @@ static struct ctl_table ecm_bond_notifie
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_bond_notifier_stop_handler,
- 	},
--	{ }
- };
- 
- void ecm_bond_notifier_stop(int num)
---- a/frontends/ecm_front_end_common.c
-+++ b/frontends/ecm_front_end_common.c
-@@ -1254,7 +1254,6 @@ static struct ctl_table ecm_front_end_sy
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_front_end_tcp_denied_ports_handler,
- 	},
--	{}
- };
- 
- /*
---- a/frontends/ecm_front_end_ipv4.c
-+++ b/frontends/ecm_front_end_ipv4.c
-@@ -152,7 +152,6 @@ static struct ctl_table ecm_front_end_ip
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_front_end_ipv4_stop_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/ecm_front_end_ipv6.c
-+++ b/frontends/ecm_front_end_ipv6.c
-@@ -153,7 +153,6 @@ static struct ctl_table ecm_front_end_ip
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_front_end_ipv6_stop_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/ppe/ecm_ppe_ipv4.c
-+++ b/frontends/ppe/ecm_ppe_ipv4.c
-@@ -998,7 +998,6 @@ static struct ctl_table ecm_ppe_ipv4_ctl
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_ppe_ipv4_vlan_passthrough_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/ppe/ecm_ppe_ipv6.c
-+++ b/frontends/ppe/ecm_ppe_ipv6.c
-@@ -1056,7 +1056,6 @@ static struct ctl_table ecm_ppe_ipv6_ctl
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_ppe_ipv6_vlan_passthrough_enable_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/sfe/ecm_sfe_common.c
-+++ b/frontends/sfe/ecm_sfe_common.c
-@@ -528,7 +528,6 @@ static struct ctl_table ecm_sfe_sysctl_t
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_sfe_tun_fast_xmit_enable_handler,
- 	},
--	{}
- };
- 
- /*
---- a/frontends/sfe/ecm_sfe_ipv4.c
-+++ b/frontends/sfe/ecm_sfe_ipv4.c
-@@ -1143,7 +1143,6 @@ static struct ctl_table ecm_sfe_ipv4_ctl
- 		.proc_handler	= &ecm_sfe_ipv4_reject_acceleration_for_ipsec_handler,
- 	},
- #endif
--	{ }
- };
- 
- /*
---- a/frontends/sfe/ecm_sfe_ipv6.c
-+++ b/frontends/sfe/ecm_sfe_ipv6.c
-@@ -1142,7 +1142,6 @@ static struct ctl_table ecm_sfe_ipv6_ctl
- 		.proc_handler	= &ecm_sfe_ipv6_reject_acceleration_for_ipsec_handler,
- 	},
- #endif
--	{ }
- };
- 
- /*
---- a/frontends/sfe/ecm_sfe_multicast_ipv4.c
-+++ b/frontends/sfe/ecm_sfe_multicast_ipv4.c
-@@ -3227,7 +3227,6 @@ static struct ctl_table ecm_sfe_multicas
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_front_end_ipv4_mc_stop_handler,
- 	},
--	{ }
- };
- 
- /*
---- a/frontends/sfe/ecm_sfe_multicast_ipv6.c
-+++ b/frontends/sfe/ecm_sfe_multicast_ipv6.c
-@@ -3220,7 +3220,6 @@ static struct ctl_table ecm_sfe_multicas
- 		.mode		= 0644,
- 		.proc_handler	= &ecm_front_end_ipv6_mc_stop_handler,
- 	},
--	{ }
- };
- 
- /*
+  * Common ECM macro to handle the kernel macro name change from kernel version 4.9 and above.
+  * GRE_VERSION_1701 and GRE_VERSION_PPTP macros in kernel version <  4.9 needs to be converted
