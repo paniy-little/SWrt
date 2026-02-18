@@ -9,19 +9,16 @@
  	ip_route_output_compat(net, daddr, saddr, tos, oif)
  
  static inline struct rtable *ip_route_output_compat(struct net *net,
-@@ -57,7 +57,10 @@ static inline struct rtable *ip_route_ou
+@@ -56,7 +56,7 @@
   * Not present in dd-wrt kernel. vlan_dev_real_dev() goes to the
   * underlying real device, functionally equivalent for single-level VLAN.
   */
 -#define vlan_dev_next_dev(dev) vlan_dev_real_dev(dev)
-+static inline struct net_device *vlan_dev_next_dev(const struct net_device *dev)
-+{
-+	return vlan_dev_priv(dev)->real_dev;
-+}
++#define vlan_dev_next_dev(dev) (vlan_dev_priv(dev)->real_dev)
  
  /*
   * netif_is_gre / netif_is_ip6gre
-@@ -117,7 +120,9 @@ static inline bool dev_fast_xmit(struct
+@@ -115,7 +115,9 @@
  	if (likely(dev->priv_flags & IFF_XMIT_DST_RELEASE)) {
  		skb_dst_drop(skb);
  	} else {
@@ -34,7 +31,7 @@
  	queue_index = netdev_pick_tx(dev, skb, NULL);
 --- a/sfe_ipv4.c
 +++ b/sfe_ipv4.c
-@@ -1510,15 +1510,15 @@ int sfe_ipv4_recv(struct net_device *dev
+@@ -1510,13 +1510,13 @@
  	/*
  	 * Handle PPPoE bridge packets using 3-tuple acceleration if SFE_PPPOE_BR_ACCEL_MODE_EN_3T
  	 */
@@ -51,10 +48,9 @@
 +#endif
  
  	protocol = iph->protocol;
- 	if (IPPROTO_UDP == protocol) {
 --- a/sfe_ipv6.c
 +++ b/sfe_ipv6.c
-@@ -1236,15 +1236,15 @@ int sfe_ipv6_recv(struct net_device *dev
+@@ -1236,13 +1236,13 @@
  	/*
  	 * Handle PPPoE bridge packets using 3-tuple acceleration if SFE_PPPOE_BR_ACCEL_MODE_EN_3T
  	 */
@@ -71,10 +67,9 @@
 +#endif
  
  	if (IPPROTO_UDP == next_hdr) {
- 		return sfe_ipv6_recv_udp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer, is_frag, fhdr);
 --- a/sfe_ipv4_udp.c
 +++ b/sfe_ipv4_udp.c
-@@ -745,7 +745,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *s
+@@ -748,7 +748,7 @@
  		struct rtable *rt;
  		dst = dst_cache_get(&cm->dst_cache);
  		if (unlikely(!dst)) {
@@ -85,7 +80,7 @@
  				rcu_read_unlock();
 --- a/sfe_ipv4_tcp.c
 +++ b/sfe_ipv4_tcp.c
-@@ -906,7 +906,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *s
+@@ -909,7 +909,7 @@
  		struct rtable *rt;
  		dst = dst_cache_get(&cm->dst_cache);
  		if (unlikely(!dst)) {
