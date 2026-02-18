@@ -10,10 +10,10 @@
  #undef register_sysctl
 --- a/ecm_db/ecm_db.c
 +++ b/ecm_db/ecm_db.c
-@@ -153,6 +153,37 @@ int ecm_db_per_client_routed_stats_state
- /*
-  * Sysctl table header
-  */
+@@ -288,6 +288,37 @@ static struct notifier_block ecm_fib_not
+ 
+ 
+ 
 +static int ecm_db_fib_notifier_ref_count;
 +
 +static int ecm_db_fib_notifier_register(void)
@@ -45,9 +45,9 @@
 +	spin_unlock_bh(&ecm_db_lock);
 +}
 +
- static struct ctl_table_header *ecm_db_ctl_table_header;
- 
  /*
+  * ecm_db_ipv4_route_table_update_event()
+  *	This is a call back for "routing table update event for IPv4".
 @@ -601,7 +632,7 @@ static int ecm_db_ipv4_route_handler(con
  
  	if (ecm_db_ipv4_route_enable) {
@@ -66,3 +66,12 @@
  	ecm_front_end_ipv4_stop_temp(0);
  
  	return ret;
+@@ -675,7 +706,7 @@ static int ecm_db_ipv6_route_handler(con
+ }
+ #endif
+ 
+-static const struct ctl_table ecm_db_ctl_table[] = {
++static struct ctl_table ecm_db_ctl_table[] = {
+ 	{
+ 		.procname	= "defunct_all",
+ 		.data		= NULL,
