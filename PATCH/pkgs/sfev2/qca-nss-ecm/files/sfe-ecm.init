@@ -32,12 +32,12 @@ sfe_enabled() {
 start_service() {
 	if sfe_enabled; then
 		logger -t sfe-ecm "SFE v2 + ECM acceleration: enabling"
-		rmmod shortcut-fe 2>/dev/null
-		rmmod shortcut-fe-ipv6 2>/dev/null
+		lsmod | grep -q "^shortcut[-_]fe " && rmmod shortcut-fe
+		lsmod | grep -q "^shortcut[-_]fe[-_]ipv6 " && rmmod shortcut-fe-ipv6
 		modprobe qca-nss-sfe 2>/dev/null
 		modprobe ecm 2>/dev/null
 		sysctl -w net.ecm.ecm_classifier_default.accel_mode=2 2>/dev/null
-		sysctl -w net.ecm.ecm_classifier_default.accel_delay_pkts=1 2>/dev/null
+		sysctl -w net.ecm.ecm_classifier_default.accel_delay_pkts_v2=3 2>/dev/null
 	fi
 }
 
@@ -55,7 +55,7 @@ reload_service() {
 			modprobe qca-nss-sfe 2>/dev/null
 			modprobe ecm 2>/dev/null
 			sysctl -w net.ecm.ecm_classifier_default.accel_mode=2 2>/dev/null
-			sysctl -w net.ecm.ecm_classifier_default.accel_delay_pkts=1 2>/dev/null
+			sysctl -w net.ecm.ecm_classifier_default.accel_delay_pkts_v2=3 2>/dev/null
 		fi
 	else
 		# Should be disabled, unload if loaded
