@@ -1,0 +1,19 @@
+--- a/ecm_classifier_default.c
++++ b/ecm_classifier_default.c
+@@ -780,7 +780,16 @@ static int ecm_classifier_accel_delay_pk
+ 	 * Write the value with user input
+ 	 */
+ 	current_val = ecm_classifier_accel_delay_pkts;
++	if (write) {
++		int *valp = (int *)buffer;
++		printk(KERN_ALERT "ECM DEBUG: accel_delay_pkts handler called. Write=1. Old=%d. User wants to write %d (from buffer?? proc_dointvec will parse it)\n", current_val, *valp); 
++		printk(KERN_ALERT "ECM DEBUG: Handler called. Write=%d. Old val=%d\n", write, current_val);
++	}
+ 	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
++	if (write) {
++		printk(KERN_ALERT "ECM DEBUG: After proc_dointvec. Ret=%d. New val=%d\n", ret, ecm_classifier_accel_delay_pkts);
++	}
++
+ 	if (ret || (!write)) {
+ 		/*
+ 		 * Return if failure or read operation
