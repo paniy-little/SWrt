@@ -30,6 +30,11 @@ wget https://downloads.openwrt.org/releases/${latest_version}/targets/x86/64/pro
 jq -r '.linux_kernel.vermagic' profiles.json >.vermagic
 sed -i -e 's/^\(.\).*vermagic$/\1cp $(TOPDIR)\/.vermagic $(LINUX_DIR)\/.vermagic/' include/kernel-defaults.mk
 
+# Hyper-V
+sed -i '/^esac$/i\
+*)\
+\tif [ -r /sys/class/dmi/id/product_name ] \&\& grep -qi "virtual machine" /sys/class/dmi/id/product_name; then\n\t\tucidef_set_interfaces_lan_wan "eth1" "eth0"\n\telse\n\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\n\tfi\n\t;;' target/linux/x86/base-files/etc/board.d/02_network
+
 # 预配置一些插件
 cp -rf ../PATCH/files ./files
 

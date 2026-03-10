@@ -146,11 +146,11 @@ jobs:
 
       - name: Maximize build space
         if: inputs.build_firmware
-        uses: easimon/maximize-build-space@master
+        uses: smallprogram/maximize-build-space@master
         with:
           swap-size-mb: 1024
-          temp-reserve-mb: 512
-          root-reserve-mb: 4608
+          temp-reserve-mb: 4608
+          root-reserve-mb: 3584
           remove-dotnet: "true"
           remove-android: "true"
           remove-haskell: "true"
@@ -353,7 +353,7 @@ jobs:
           allowUpdates: true
           prerelease: false
           tag: ${{ matrix.name }}-${{ env.latest_release }} # 使用平台名称作为tag前缀
-          commit: "24.10"
+          commit: "25.12"
           removeArtifacts: true
           replacesArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
