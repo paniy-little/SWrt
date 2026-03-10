@@ -292,6 +292,8 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 # rm -rf ./package/new/openwrt_helloworld
 # grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
 # echo "上面是内容"
+#修复fail2ban
+sed -i '/PKG_BUILD_DEPENDS/a PKG_BUILD_DEPENDS+=python3-setuptools/host' feeds/packages/net/fail2ban/Makefile
 
 ### 最后的收尾工作 ###
 # Lets Fuck
