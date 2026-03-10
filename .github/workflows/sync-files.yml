@@ -58,8 +58,9 @@ jobs:
       - name: Copy Files from Source to Target and Restore SELF
         run: |
           # 使用 rsync 复制源仓库的所有文件到目标仓库，并排除 .github 和 SELF 目录
-          # 移除 --delete 参数以避免意外删除目标仓库的特有文件
-          rsync -av \
+          # 添加 --delete 参数以确保源仓库中删除的文件也会在目标仓库中被删除
+          rsync -av --delete \
+            --exclude='.git/' \
             --exclude='SELF' \
             --exclude='.github/' \
             source-repo/ target-repo/
