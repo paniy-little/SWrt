@@ -294,8 +294,9 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 # echo "上面是内容"
 # eth0和eth1对调
 sed -i 's/eth0/__TEMP__/g; s/eth1/eth0/g; s/__TEMP__/eth1/g' package/base-files/etc/config/network
-# #修复fail2ban
-# sed -i '/include \$(INCLUDE_DIR)\/package.mk/a PKG_BUILD_DEPENDS += python3-setuptools/host' feeds/packages/net/fail2ban/Makefile
+#修复fail2ban
+sed -i '/include \$(INCLUDE_DIR)\/package.mk/a PKG_BUILD_DEPENDS:= \\\n\tpython3/host \\\n\tpython-setuptools/host' feeds/packages/net/fail2ban/Makefile
+sed -i '/^DEPENDS:=/ s/$/ +python3-setuptools/' feeds/packages/net/fail2ban/Makefile
 
 ### 最后的收尾工作 ###
 # Lets Fuck

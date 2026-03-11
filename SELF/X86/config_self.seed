@@ -295,9 +295,9 @@ CONFIG_PACKAGE_tar=y
 CONFIG_PACKAGE_xz=y
 CONFIG_PACKAGE_zstd=y
 
-###fail2ban
-##CONFIG_PACKAGE_fail2ban=y
-##CONFIG_PACKAGE_python3-setuptools=y	
+#fail2ban
+CONFIG_PACKAGE_fail2ban=y
+CONFIG_PACKAGE_python3-setuptools=y	
 
 # More
 CONFIG_PACKAGE_coreutils-timeout=y
