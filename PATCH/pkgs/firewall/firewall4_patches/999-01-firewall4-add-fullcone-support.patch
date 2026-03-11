@@ -25,19 +25,19 @@ IPv6 traffic do NOT need this FullCone NAT functionality.
  	option forward		REJECT
  # Uncomment this line to disable ipv6 rules
  #	option disable_ipv6	1
-+	option fullcone '1'
++	option fullcone		0
  
  config zone
  	option name		lan
-@@ -20,6 +21,8 @@ config zone
- 	option input		REJECT
- 	option output		ACCEPT
+@@ -22,6 +23,8 @@ config zone
  	option forward		DROP
-+	option fullcone4 '1'
-+	option fullcone6 '1'
  	option masq		1
  	option mtu_fix		1
++	option fullcone4	1
++	option fullcone6	1
  
+ config forwarding
+ 	option src		lan
 --- a/root/usr/share/firewall4/templates/ruleset.uc
 +++ b/root/usr/share/firewall4/templates/ruleset.uc
 @@ -323,6 +323,12 @@ table inet fw4 {
