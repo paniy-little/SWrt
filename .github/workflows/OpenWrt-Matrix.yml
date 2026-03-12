@@ -301,7 +301,7 @@ jobs:
           # --- 修改开始：按照 X86-OpenWrt_self.yml 的逻辑移动文件 ---
           # X86 特定文件
           if [ "${{ matrix.name }}" = "X86" ]; then
-            mv openwrt/bin/targets/${{ matrix.arch }}/*combined-efi.img* ./artifact/ || true
+            mv openwrt/bin/targets/${{ matrix.arch }}/*ext4-combined-efi.img* ./artifact/ || true
             mv openwrt/bin/targets/${{ matrix.arch }}/*combined-efi.vhdx* ./artifact/ || true
             mv openwrt/bin/targets/${{ matrix.arch }}/*generic-rootfs.tar.gz* ./artifact/ || true
           else
@@ -325,7 +325,7 @@ jobs:
           # --- 修改开始：按照 X86-OpenWrt_self.yml 的逻辑生成 SHA256 和 ZIP ---
           if [ "${{ matrix.name }}" = "X86" ]; then
               sha256sum openwrt*x86* | tee X86-${{ env.latest_time }}-${{ env.latest_release }}.sha256sum
-              zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *x86-64-generic*
+              zip X86-${{ env.latest_time }}-${{ env.latest_release }}-ext4.zip *ext4-combined*
               # zip X86-${{ env.latest_time }}-${{ env.latest_release }}-sfs.zip *squashfs-combined*
           else
               # 其他平台保持原逻辑
