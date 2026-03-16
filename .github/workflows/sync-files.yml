@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout Target Repository (${{ matrix.target_branch }})
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
         with:
           repository: paniy-little/SWrt # 目标仓库
           ref: ${{ matrix.target_branch }} # 目标分支（动态：24.10或25.12）

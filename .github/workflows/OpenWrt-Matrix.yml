@@ -248,7 +248,7 @@ jobs:
       # upload_source
       - name: Upload Source Archive
         if: inputs.upload_source
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@main
         with:
           name: ${{ env.openwrt_source_name }}
           path: |
@@ -338,7 +338,7 @@ jobs:
 
       - name: Upload artifact
         if: inputs.build_firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@main
         with:
           name: OpenWRT_${{ env.latest_release }}_${{ matrix.name }}
           path: ./artifact/
