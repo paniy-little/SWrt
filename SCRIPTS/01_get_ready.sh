@@ -70,6 +70,7 @@ cp -rf openwrt_snap/include/package.mk /tmp/package.mk.bak
 cp -rf openwrt_snap/include/kernel.mk /tmp/kernel.mk.bak
 cp -rf openwrt_snap/scripts/metadata.pm /tmp/metadata.pm.bak
 cp -rf openwrt/package/libs/toolchain/Makefile /tmp/Makefile.bak
+cp -rf openwrt/package/system/procd /tmp/procd.bak
 find openwrt/package/* -maxdepth 0 ! -name 'firmware' ! -name 'kernel' ! -name 'base-files' ! -name 'Makefile' -exec rm -rf {} +
 rm -rf ./openwrt_snap/package/firmware ./openwrt_snap/package/kernel ./openwrt_snap/package/base-files ./openwrt_snap/package/Makefile
 cp -rf ./openwrt_snap/package/* ./openwrt/package/
@@ -79,6 +80,8 @@ cp -rf /tmp/kernel.mk.bak ./openwrt/include/kernel.mk
 cp -rf /tmp/metadata.pm.bak ./openwrt/scripts/metadata.pm
 cp -rf /tmp/Makefile.bak ./openwrt/package/libs/toolchain/Makefile
 cp -rf ./openwrt_snap/feeds.conf.default ./openwrt/feeds.conf.default
+rm -rf openwrt/package/system/procd
+cp -rf /tmp/procd.bak ./openwrt/package/system/procd
 
 # 退出脚本
 exit 0
