@@ -73,6 +73,10 @@ CONFIG_LRNG_CPU=y
 CONFIG_LRNG_SELFTEST=y
 # CONFIG_LRNG_SELFTEST_PANIC is not set
 ' >>./target/linux/generic/config-${KERNEL_VERSION}
+# NETKIT
+echo '
+CONFIG_NETKIT=y
+' >>./target/linux/generic/config-${KERNEL_VERSION}
 # wg
 cp -rf ../PATCH/kernel/wg/* ./target/linux/generic/hack-${KERNEL_VERSION}/
 # dont wrongly interpret first-time data
