@@ -243,6 +243,19 @@ CONFIG_PACKAGE_kmod-crypto-xcbc=y
 CONFIG_PACKAGE_kmod-crypto-xts=y
 CONFIG_PACKAGE_kmod-crypto-xxhash=y
 
+## 硬件加速优化，针对无avx环境
+# 禁用需要AVX的加密模块，以避免在不支持AVX的环境中加载失败
+CONFIG_PACKAGE_kmod-crypto-aes-ni-avx2=n
+CONFIG_PACKAGE_kmod-crypto-aes-ni-avx=n
+
+# 启用AES-NI支持，因为虚拟机中已透传
+CONFIG_PACKAGE_kmod-crypto-aes-ni=y
+
+# 确保软件实现作为后备
+CONFIG_PACKAGE_kmod-crypto-aes=y
+CONFIG_PACKAGE_kmod-crypto-camellia=y
+##
+
 ##突然决定不犯蠢了。。
 CONFIG_PACKAGE_block-mount=y
 
