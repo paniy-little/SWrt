@@ -224,6 +224,13 @@ jobs:
         run: |
           make defconfig
 
+      - name: Show final config
+        working-directory: ${{ github.workspace }}/openwrt
+        run: |
+          echo "=== Final .config file content ==="
+          cat .config
+          echo "=== End of .config file ==="
+
       - name: Get Architecture
         id: getarch
         working-directory: ${{ github.workspace }}/openwrt
@@ -255,11 +262,19 @@ jobs:
             ${{ env.openwrt_source_name }}
           retention-days: 5
 
+      - name: Check config changes
+        id: check_config
+        working-directory: ${{ github.workspace }}/openwrt
+        run: |
+          # Calculate config hash
+          config_hash=$(md5sum .config | awk '{print $1}')
+          echo "config_hash=$config_hash" >> $GITHUB_ENV
+
       - name: Cache
         if: inputs.build_firmware
         uses: HiGarfield/cachewrtbuild@main
         with:
-          mixkey: ${{ env.TARGET_DEVICE_ARCH }}
+          mixkey: ${{ env.TARGET_DEVICE_ARCH }}-${{ env.config_hash }}
           prefix: ${{ github.workspace }}/openwrt
           skip_saving: ${{ !inputs.build_firmware }}
 
