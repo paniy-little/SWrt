@@ -281,30 +281,24 @@ CONFIG_KERNEL_CC_OPTIMIZE_FOR_PERFORMANCE=y
 CONFIG_PACKAGE_zram-swap=y
 CONFIG_PACKAGE_zramctl=y
 
-# 1. [核心底层] 开启内核 ZRAM 多算法后端支持 (解决 Invalid argument)
+# 1. [核心底层] 开启内核 ZRAM 多算法后端支持
 CONFIG_KERNEL_ZRAM_MULTI_COMP=y
 CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y
 
-# 2. [强制内置] 将 LZ4 编译进内核镜像，而非作为 .ko 模块 (解决加载顺序问题)
-CONFIG_CRYPTO_LZ4=y
-CONFIG_CRYPTO_LZ4_X86=y
-CONFIG_CRYPTO_LZO=y
-CONFIG_CRYPTO_ZSTD=y
+# 2. [强制内置] 必须加 KERNEL 前缀，否则它只会在编译包时生效，不会进内核内核
+CONFIG_KERNEL_CRYPTO_LZ4=y
+CONFIG_KERNEL_CRYPTO_LZ4_X86=y
+CONFIG_KERNEL_CRYPTO_LZO=y
+CONFIG_KERNEL_CRYPTO_ZSTD=y
 
-# 3. [接口支持] 确保异步接口同样内置
-CONFIG_CRYPTO_ACOMPRESS=y
-CONFIG_CRYPTO_MANAGER=y
+# 3. [接口支持] 同样需要内核级内置
+CONFIG_KERNEL_CRYPTO_ACOMPRESS=y
+CONFIG_KERNEL_CRYPTO_MANAGER=y
 
-# 4. [软件包] 对应的 OpenWrt 模块 (保持勾选以同步依赖)
-CONFIG_PACKAGE_kmod-crypto-lz4=y
-CONFIG_PACKAGE_kmod-crypto-zstd=y
+# 4. [软件包] 保持勾选
 CONFIG_PACKAGE_kmod-lib-lz4=y
-CONFIG_PACKAGE_kmod-lib-zstd=y
-
-# 5. [用户态] 工具与库
 CONFIG_PACKAGE_liblz4=y
 CONFIG_PACKAGE_libzstd=y
-CONFIG_PACKAGE_zstd=y
 
 ## 额外优化
 # 开启 io_uring 支持 (优化 Samba 和 现代内核 I/O 性能)

@@ -63,6 +63,7 @@ jobs:
             --exclude='.git/' \
             --exclude='SELF' \
             --exclude='.github/' \
+            --exclude='PATCH/files/etc/hotplug.d/iface/99-zzz-odhcpd*' \
             source-repo/ target-repo/
 
           # 同步整个 .github/workflows/ 目录到 workflows-templates/
