@@ -255,11 +255,18 @@ jobs:
             ${{ env.openwrt_source_name }}
           retention-days: 5
 
+      - name: Prepare config file for upload
+        working-directory: ${{ github.workspace }}/openwrt
+        run: |
+          # Copy config to final.config for clearer identification
+          cp .config final.config
+          echo "Copied .config to final.config"
+
       - name: Upload config file as artifact
         uses: actions/upload-artifact@main
         with:
           name: config-${{ matrix.name }}
-          path: ${{ github.workspace }}/openwrt/.config
+          path: ${{ github.workspace }}/openwrt/final.config
           retention-days: 5
 
       - name: Check config changes
