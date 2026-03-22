@@ -224,11 +224,26 @@ jobs:
         run: |
           make defconfig
 
+      - name: Check config file
+        working-directory: ${{ github.workspace }}/openwrt
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo "Config file status:"
+          if [ -f .config ]; then
+            echo "✓ .config file exists"
+            echo "File size: $(ls -lh .config | awk '{print $5}')"
+          else
+            echo "✗ .config file does not exist"
+          fi
+
       - name: Upload config file as artifact
+        working-directory: ${{ github.workspace }}/openwrt
         uses: actions/upload-artifact@main
         with:
           name: config-${{ matrix.name }}
-          path: ${{ github.workspace }}/openwrt/.config
+          path: .config
           retention-days: 5
 
       - name: Get Architecture
