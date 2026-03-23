@@ -258,17 +258,11 @@ CONFIG_PACKAGE_block-mount=y
 #CONFIG_KERNEL_BTRFS_FS_POSIX_ACL=y
 CONFIG_KERNEL_CC_OPTIMIZE_FOR_PERFORMANCE=y
 
-### ZRAM & COMPRESSION - KERNEL 6.12 DEEP FIX ###
+### ZRAM & COMPRESSION ###
 CONFIG_PACKAGE_zram-swap=y
 CONFIG_PACKAGE_kmod-zram=y
-
-# [软件包] 保持勾选
 CONFIG_PACKAGE_kmod-lib-lz4=y
-CONFIG_PACKAGE_kmod-lib-lz4-decompress=y
-# CONFIG_PACKAGE_kmod-lib-lz4hc is not set
-CONFIG_PACKAGE_liblz4=y
-# CONFIG_PACKAGE_lz4 is not set
-CONFIG_PACKAGE_libzstd=y
+CONFIG_PACKAGE_kmod-lib-zstd=y
 
 ## 额外优化
 # 开启 io_uring 支持 (优化 Samba 和 现代内核 I/O 性能)
