@@ -76,6 +76,7 @@ CONFIG_LRNG_SELFTEST=y
 # NETKIT
 echo '
 CONFIG_NETKIT=y
+CONFIG_IPV6_MULTIPLE_TABLES=y
 ' >>./target/linux/generic/config-${KERNEL_VERSION}
 # wg
 cp -rf ../PATCH/kernel/wg/* ./target/linux/generic/hack-${KERNEL_VERSION}/
