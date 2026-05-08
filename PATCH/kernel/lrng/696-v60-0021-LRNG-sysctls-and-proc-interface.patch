@@ -1,7 +1,7 @@
-From e654eb99e42ba070cf3a16c363ffd710daf220ac Mon Sep 17 00:00:00 2001
+From 92c133557ee096ac155b684d1b8caeb678c4d80f Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Sun, 31 Jul 2022 22:34:51 +0200
-Subject: [PATCH v58 21/25] LRNG - sysctls and /proc interface
+Subject: [PATCH v60 21/25] LRNG - sysctls and /proc interface
 
 The LRNG sysctl interface provides the same controls as the existing
 /dev/random implementation. These sysctls behave identically and are
@@ -34,7 +34,7 @@ index 0a61a2c9ec6e..52b4625a0760 100644
  obj-$(CONFIG_LRNG_SWITCH)		+= lrng_switch.o
 diff --git a/drivers/char/lrng/lrng_sysctl.c b/drivers/char/lrng/lrng_sysctl.c
 new file mode 100644
-index 000000000000..1280e03c49f7
+index 000000000000..a2be9229ac79
 --- /dev/null
 +++ b/drivers/char/lrng/lrng_sysctl.c
 @@ -0,0 +1,139 @@
@@ -126,7 +126,7 @@ index 000000000000..1280e03c49f7
 +	mb();
 +}
 +
-+static struct ctl_table random_table[] = {
++static const struct ctl_table random_table[] = {
 +	{
 +		.procname	= "poolsize",
 +		.maxlen		= sizeof(int),
@@ -178,5 +178,5 @@ index 000000000000..1280e03c49f7
 +}
 +device_initcall(random_sysctls_init);
 -- 
-2.48.1
+2.52.0
 

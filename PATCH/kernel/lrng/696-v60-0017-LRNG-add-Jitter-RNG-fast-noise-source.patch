@@ -1,7 +1,7 @@
-From 72198a8300e5f35a4cd48fc91fdfb696bdbc02c4 Mon Sep 17 00:00:00 2001
+From 11b3ffca885335f05ad874c1de2238e68730554a Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
-Date: Sun, 27 Aug 2023 17:11:37 +0200
-Subject: [PATCH v58 17/25] LRNG - add Jitter RNG fast noise source
+Date: Fri, 12 Dec 2025 20:35:54 +0100
+Subject: [PATCH v60 17/25] LRNG - add Jitter RNG fast noise source
 
 The Jitter RNG fast noise source implemented as part of the kernel
 crypto API is queried for 256 bits of entropy at the time the seed
@@ -16,8 +16,8 @@ Signed-off-by: Stephan Mueller <smueller@chronox.de>
 ---
  drivers/char/lrng/Kconfig        | 172 +++++++--------
  drivers/char/lrng/Makefile       |   1 +
- drivers/char/lrng/lrng_es_jent.c | 358 +++++++++++++++++++++++++++++++
- 3 files changed, 445 insertions(+), 86 deletions(-)
+ drivers/char/lrng/lrng_es_jent.c | 346 +++++++++++++++++++++++++++++++
+ 3 files changed, 433 insertions(+), 86 deletions(-)
  create mode 100644 drivers/char/lrng/lrng_es_jent.c
 
 diff --git a/drivers/char/lrng/Kconfig b/drivers/char/lrng/Kconfig
@@ -216,10 +216,10 @@ index 101c323ea1f2..96652f3aefd9 100644
  obj-$(CONFIG_LRNG_HEALTH_TESTS)		+= lrng_health.o
 diff --git a/drivers/char/lrng/lrng_es_jent.c b/drivers/char/lrng/lrng_es_jent.c
 new file mode 100644
-index 000000000000..4b6cd5d50218
+index 000000000000..bd30720cf3cb
 --- /dev/null
 +++ b/drivers/char/lrng/lrng_es_jent.c
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,346 @@
 +// SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
 +/*
 + * LRNG Fast Entropy Source: Jitter RNG
@@ -550,18 +550,6 @@ index 000000000000..4b6cd5d50218
 +	lrng_jent_initialized = true;
 +	pr_debug("Jitter RNG working on current system\n");
 +
-+	/*
-+	 * In FIPS mode, the Jitter RNG is defined to have full of entropy
-+	 * unless a different value has been specified at the command line
-+	 * (i.e. the user overrides the default), and the default value is
-+	 * larger than zero (if it is zero, it is assumed that an RBG2(P) or
-+	 * RBG2(NP) construction is attempted that intends to exclude the
-+	 * Jitter RNG).
-+	 */
-+	if (fips_enabled && CONFIG_LRNG_JENT_ENTROPY_RATE > 0 &&
-+	    jent_entropy == CONFIG_LRNG_JENT_ENTROPY_RATE)
-+		jent_entropy = LRNG_DRNG_SECURITY_STRENGTH_BITS;
-+
 +	if (jent_entropy)
 +		lrng_force_fully_seeded();
 +
@@ -579,5 +567,5 @@ index 000000000000..4b6cd5d50218
 +	.switch_hash		= NULL,
 +};
 -- 
-2.48.1
+2.52.0
 

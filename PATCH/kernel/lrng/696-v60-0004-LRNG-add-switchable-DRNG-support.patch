@@ -1,7 +1,7 @@
-From 821cb98802bd93c5391122d6c06c7dd83a33ce3c Mon Sep 17 00:00:00 2001
+From 254d147ec31cde4209ba20a4fd3f4f6e98ec5a8a Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Mon, 20 Feb 2023 22:02:06 +0100
-Subject: [PATCH v58 04/25] LRNG - add switchable DRNG support
+Subject: [PATCH v60 04/25] LRNG - add switchable DRNG support
 
 The DRNG switch support allows replacing the DRNG mechanism of the
 LRNG. The switching support rests on the interface definition of
@@ -369,5 +369,5 @@ index 000000000000..13c70797b193
 +}
 +EXPORT_SYMBOL(lrng_set_hash_cb);
 -- 
-2.48.1
+2.52.0
 

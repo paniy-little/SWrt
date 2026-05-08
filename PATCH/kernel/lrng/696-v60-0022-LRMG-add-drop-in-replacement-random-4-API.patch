@@ -1,7 +1,7 @@
-From dcd78d658dd2fa43d749455f759946de3cfd102a Mon Sep 17 00:00:00 2001
+From 0f83d6344a4edd2709ce343826bd7668d6560c32 Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Mon, 20 Feb 2023 22:12:04 +0100
-Subject: [PATCH v58 22/25] LRMG - add drop-in replacement random(4) API
+Subject: [PATCH v60 22/25] LRMG - add drop-in replacement random(4) API
 
 The LRNG is intended to be a full replacement of the existing random.c.
 This also includes the providing of a full API and ABI compliant drop-in
@@ -25,7 +25,7 @@ Signed-off-by: Stephan Mueller <smueller@chronox.de>
  create mode 100644 drivers/char/lrng/lrng_interface_random_user.c
 
 diff --git a/drivers/char/Makefile b/drivers/char/Makefile
-index ee08348a94b8..f00df53befb3 100644
+index 455c6dfb050e..c64a8b43cfdb 100644
 --- a/drivers/char/Makefile
 +++ b/drivers/char/Makefile
 @@ -3,7 +3,8 @@
@@ -37,7 +37,7 @@ index ee08348a94b8..f00df53befb3 100644
 +obj-$(CONFIG_RANDOM_DEFAULT_IMPL) += random.o
  obj-$(CONFIG_TTY_PRINTK)	+= ttyprintk.o
  obj-y				+= misc.o
- obj-$(CONFIG_ATARI_DSP56K)	+= dsp56k.o
+ obj-$(CONFIG_TEST_MISC_MINOR)	+= misc_minor_kunit.o
 diff --git a/drivers/char/lrng/Makefile b/drivers/char/lrng/Makefile
 index 52b4625a0760..6242262d577e 100644
 --- a/drivers/char/lrng/Makefile
@@ -953,5 +953,5 @@ index 000000000000..d12e883804d9
 +				      flags & GRND_RANDOM, buf, count);
 +}
 -- 
-2.48.1
+2.52.0
 

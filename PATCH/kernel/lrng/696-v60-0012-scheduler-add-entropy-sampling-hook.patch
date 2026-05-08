@@ -1,7 +1,7 @@
-From a0126247b2fe99f01bb62ce72ae668720dbd1e3d Mon Sep 17 00:00:00 2001
+From 4c6ed7b18caaa9c0af0729ca4ccf77d237fdc881 Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Sat, 28 Sep 2024 21:24:59 +0200
-Subject: [PATCH v58 12/25] scheduler - add entropy sampling hook
+Subject: [PATCH v60 12/25] scheduler - add entropy sampling hook
 
 The scheduler can be used as a source of entropy. This requires the
 presence of a hook that invokes the entropy source implementation.
@@ -15,18 +15,18 @@ Signed-off-by: Stephan Mueller <smueller@chronox.de>
  1 file changed, 3 insertions(+)
 
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 3e5a6bf587f9..56a3d7460bb6 100644
+index f754a60de848..b4939ef8fad5 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -7,6 +7,7 @@
-  *  Copyright (C) 1991-2002  Linus Torvalds
-  *  Copyright (C) 1998-2024  Ingo Molnar, Red Hat
+@@ -9,6 +9,7 @@
   */
+ #define INSTANTIATE_EXPORTED_MIGRATE_DISABLE
+ #include <linux/sched.h>
 +#include <linux/lrng.h>
  #include <linux/highmem.h>
  #include <linux/hrtimer_api.h>
  #include <linux/ktime_api.h>
-@@ -3651,6 +3652,8 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
+@@ -3641,6 +3642,8 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
  {
  	struct rq *rq;
  
@@ -36,5 +36,5 @@ index 3e5a6bf587f9..56a3d7460bb6 100644
  		return;
  
 -- 
-2.48.1
+2.52.0
 

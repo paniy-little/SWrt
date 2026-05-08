@@ -1,7 +1,7 @@
-From 15f76bc8cb79cb19d06f4051566a0993822cf8cc Mon Sep 17 00:00:00 2001
+From 0a617c850a9308b0814b8bc11d3df10f8119afc9 Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Sun, 18 Dec 2022 21:12:42 +0100
-Subject: [PATCH v58 03/25] LRNG - /proc interface
+Subject: [PATCH v60 03/25] LRNG - /proc interface
 
 The patch adds the file lrng_type which provides details about
 the LRNG:
@@ -141,5 +141,5 @@ index e8097abe7fbd..c653274f1954 100644
  
  #endif /* _LRNG_PROC_H */
 -- 
-2.48.1
+2.52.0
 

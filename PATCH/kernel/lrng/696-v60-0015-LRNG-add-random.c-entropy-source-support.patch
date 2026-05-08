@@ -1,7 +1,7 @@
-From 5d11626b4cf9c730fb8f7852c02b4b68579cd190 Mon Sep 17 00:00:00 2001
+From d46c1196f9a905305d05d31e4cbb40a30baa0beb Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Mon, 20 Feb 2023 22:07:27 +0100
-Subject: [PATCH v58 15/25] LRNG - add random.c entropy source support
+Subject: [PATCH v60 15/25] LRNG - add random.c entropy source support
 
 The random.c implementation can be used as an entropy source by the
 LRNG. This support can be enabled at compile time.
@@ -213,5 +213,5 @@ index 000000000000..519ba640cc75
 +	.switch_hash		= NULL,
 +};
 -- 
-2.48.1
+2.52.0
 

@@ -1,7 +1,7 @@
-From 14dbacba9d2b0fed496d74908539385dd391820b Mon Sep 17 00:00:00 2001
+From de92c8e12d9306f8166942c0b40b8d139856ca2b Mon Sep 17 00:00:00 2001
 From: Stephan Mueller <smueller@chronox.de>
 Date: Sat, 1 Feb 2025 11:53:01 +0100
-Subject: [PATCH v58 01/25] LRNG: Entropy Source and DRNG Manager
+Subject: [PATCH v60 01/25] LRNG: Entropy Source and DRNG Manager
 
 The kernel crypto API contains deterministic random number generators
 (DRNG) which a caller must seed and reseed. The task of seeding a DRNG
@@ -201,7 +201,7 @@ Signed-off-by: Stephan Mueller <smueller@chronox.de>
  create mode 100644 include/linux/lrng.h
 
 diff --git a/drivers/char/Kconfig b/drivers/char/Kconfig
-index 8fb33c90482f..0a09ee313ada 100644
+index d2cfc584e202..7f5de8969a49 100644
 --- a/drivers/char/Kconfig
 +++ b/drivers/char/Kconfig
 @@ -423,4 +423,6 @@ config ADI
@@ -212,10 +212,10 @@ index 8fb33c90482f..0a09ee313ada 100644
 +
  endmenu
 diff --git a/drivers/char/Makefile b/drivers/char/Makefile
-index e9b360cdc99a..ee08348a94b8 100644
+index 1291369b9126..455c6dfb050e 100644
 --- a/drivers/char/Makefile
 +++ b/drivers/char/Makefile
-@@ -43,3 +43,5 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
+@@ -44,3 +44,5 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
  obj-$(CONFIG_XILLYBUS_CLASS)	+= xillybus/
  obj-$(CONFIG_POWERNV_OP_PANEL)	+= powernv-op-panel.o
  obj-$(CONFIG_ADI)		+= adi.o
@@ -1461,7 +1461,7 @@ index 000000000000..7ae10f20b4b8
 +#endif /* _LRNG_DRNG_ATOMIC_H */
 diff --git a/drivers/char/lrng/lrng_drng_chacha20.c b/drivers/char/lrng/lrng_drng_chacha20.c
 new file mode 100644
-index 000000000000..31be102e3007
+index 000000000000..36960fdd715c
 --- /dev/null
 +++ b/drivers/char/lrng/lrng_drng_chacha20.c
 @@ -0,0 +1,195 @@
@@ -1504,7 +1504,7 @@ index 000000000000..31be102e3007
 +	BUILD_BUG_ON(CHACHA_BLOCK_SIZE != 2 * CHACHA_KEY_SIZE);
 +
 +	if (used_words > CHACHA_KEY_SIZE_WORDS) {
-+		chacha20_block(&chacha20->constants[0], (u8 *)tmp);
++		chacha20_block((struct chacha_state *)chacha20, (u8 *)tmp);
 +		for (i = 0; i < CHACHA_KEY_SIZE_WORDS; i++)
 +			chacha20->key.u[i] ^= le32_to_cpu(tmp[i]);
 +		memzero_explicit(tmp, sizeof(tmp));
@@ -1574,13 +1574,13 @@ index 000000000000..31be102e3007
 +	int zeroize_buf = 0;
 +
 +	while (outbuflen >= CHACHA_BLOCK_SIZE) {
-+		chacha20_block(&chacha20->constants[0], outbuf);
++		chacha20_block((struct chacha_state *)chacha20, outbuf);
 +		outbuf += CHACHA_BLOCK_SIZE;
 +		outbuflen -= CHACHA_BLOCK_SIZE;
 +	}
 +
 +	if (outbuflen) {
-+		chacha20_block(&chacha20->constants[0], (u8 *)aligned_buf);
++		chacha20_block((struct chacha_state *)chacha20, (u8 *)aligned_buf);
 +		memcpy(outbuf, aligned_buf, outbuflen);
 +		used = ((outbuflen + sizeof(aligned_buf[0]) - 1) /
 +			sizeof(aligned_buf[0]));
@@ -1662,7 +1662,7 @@ index 000000000000..31be102e3007
 +#endif /* CONFIG_LRNG_DFLT_DRNG_CHACHA20 */
 diff --git a/drivers/char/lrng/lrng_drng_chacha20.h b/drivers/char/lrng/lrng_drng_chacha20.h
 new file mode 100644
-index 000000000000..fee6571281b6
+index 000000000000..8e1eb8c1ec96
 --- /dev/null
 +++ b/drivers/char/lrng/lrng_drng_chacha20.h
 @@ -0,0 +1,42 @@
@@ -1696,7 +1696,7 @@ index 000000000000..fee6571281b6
 +
 +static inline void lrng_cc20_init_rfc7539(struct chacha20_block *chacha20)
 +{
-+	chacha_init_consts(chacha20->constants);
++	chacha_init_consts((struct chacha_state *)chacha20->constants);
 +}
 +
 +#define LRNG_CC20_INIT_RFC7539(x) \
@@ -3078,7 +3078,7 @@ index 000000000000..cf982b9eea05
 +#endif /* _LRNG_ES_RANDOM_H */
 diff --git a/drivers/char/lrng/lrng_es_mgr.c b/drivers/char/lrng/lrng_es_mgr.c
 new file mode 100644
-index 000000000000..4ed5de545a3a
+index 000000000000..54c1f57cad1e
 --- /dev/null
 +++ b/drivers/char/lrng/lrng_es_mgr.c
 @@ -0,0 +1,528 @@
@@ -3260,7 +3260,7 @@ index 000000000000..4ed5de545a3a
 +	lrng_state.all_online_numa_node_seeded = false;
 +
 +#ifdef CONFIG_VDSO_GETRANDOM
-+	WRITE_ONCE(__arch_get_k_vdso_rng_data()->is_ready, false);
++	WRITE_ONCE(vdso_k_rng_data->is_ready, false);
 +#endif
 +
 +	pr_debug("reset LRNG\n");
@@ -3304,7 +3304,7 @@ index 000000000000..4ed5de545a3a
 +	 * The LRNG does not enable the user space ChaCha20
 +	 * DRNG in the VDSO.
 +	 */
-+	/* WRITE_ONCE(__arch_get_k_vdso_rng_data()->is_ready, true); */
++	/* WRITE_ONCE(vdso_k_rng_data->is_ready, true); */
 +#endif
 +
 +	wake_up_all(&lrng_init_wait);
@@ -3374,7 +3374,7 @@ index 000000000000..4ed5de545a3a
 +		lrng_state.lrng_fully_seeded = false;
 +
 +#ifdef CONFIG_VDSO_GETRANDOM
-+		WRITE_ONCE(__arch_get_k_vdso_rng_data()->is_ready, false);
++		WRITE_ONCE(vdso_k_rng_data->is_ready, false);
 +#endif
 +
 +		/* If sufficient entropy is available, reseed now. */
@@ -4448,5 +4448,5 @@ index 000000000000..c0d31a03d51f
 +
 +#endif /* _LRNG_H */
 -- 
-2.48.1
+2.52.0
 
