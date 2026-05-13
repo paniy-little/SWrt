@@ -295,7 +295,9 @@ jobs:
         continue-on-error: true
         run: |
           IGNORE_ERRORS=1 make -j$(($(nproc) + 1))
-          echo $?
+          status=$?
+          echo "compile_status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
       - name: If Error
         if: steps.compileopenwrt.outcome == 'failure'
         working-directory: ${{ github.workspace }}/openwrt
