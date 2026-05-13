@@ -5,24 +5,23 @@
 # libsodium
 sed -i 's,no-mips16 no-lto,no-mips16,g' feeds/packages/libs/libsodium/Makefile
 
-echo '#!/bin/sh
+cat > ./package/base-files/files/etc/rc.local <<'EOF'
+#!/bin/sh
 # Put your custom commands here that should be executed once
 # the system init finished. By default this file does nothing.
 
-if ! grep "Default string" /tmp/sysinfo/model > /dev/null; then
-    echo should be fine
-else
-    echo "Generic PC" > /tmp/sysinfo/model
-fi
+echo "Hyper-V Virtual Machine" > /tmp/sysinfo/model
 
-status=$(cat /sys/devices/system/cpu/intel_pstate/status)
+if [ -r /sys/devices/system/cpu/intel_pstate/status ]; then
+    status=$(cat /sys/devices/system/cpu/intel_pstate/status)
 
-if [ "$status" = "passive" ]; then
-    echo "active" | tee /sys/devices/system/cpu/intel_pstate/status
+    if [ "$status" = "passive" ]; then
+        echo "active" > /sys/devices/system/cpu/intel_pstate/status
+    fi
 fi
 
 exit 0
-'> ./package/base-files/files/etc/rc.local
+EOF
 
 #Vermagic
 latest_version="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][5-9]/p' | sed -n 1p | sed 's/v//g' | sed 's/.tar.gz//g')"
@@ -30,10 +29,11 @@ wget https://downloads.openwrt.org/releases/${latest_version}/targets/x86/64/pro
 jq -r '.linux_kernel.vermagic' profiles.json >.vermagic
 sed -i -e 's/^\(.\).*vermagic$/\1cp $(TOPDIR)\/.vermagic $(LINUX_DIR)\/.vermagic/' include/kernel-defaults.mk
 
-# Hyper-V
+# Hyper-V 专用：默认第一个网卡为 WAN，第二个网卡为 LAN
 sed -i '/^esac$/i\
 *)\
-\tif [ -r /sys/class/dmi/id/product_name ] \&\& grep -qi "virtual machine" /sys/class/dmi/id/product_name; then\n\t\tucidef_set_interfaces_lan_wan "eth1" "eth0"\n\telse\n\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\n\tfi\n\t;;' target/linux/x86/base-files/etc/board.d/02_network
+\tucidef_set_interfaces_lan_wan "eth1" "eth0"\
+\t;;' target/linux/x86/base-files/etc/board.d/02_network
 
 # 预配置一些插件
 cp -rf ../PATCH/files ./files

@@ -64,6 +64,7 @@ jobs:
             --exclude='SELF' \
             --exclude='.github/' \
             --exclude='PATCH/files/etc/hotplug.d/iface/99-zzz-odhcpd*' \
+            --exclude='PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd' \
             source-repo/ target-repo/
 
           # 同步整个 .github/workflows/ 目录到 workflows-templates/
@@ -134,4 +135,3 @@ jobs:
           cd target-repo
           git status
           git log -1
-          

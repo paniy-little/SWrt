@@ -4,7 +4,8 @@ CONFIG_TARGET_x86_64=y
 CONFIG_TARGET_x86_64_DEVICE_generic=y
 # CONFIG_TARGET_IMAGES_EFI=y        # [REMOVED] 不在 final.config 中
 # CONFIG_TARGET_IMAGES_BIOS is not set  # 禁用 BIOS 启动镜像
-CONFIG_GRUB_EFI_IMAGES=y          # [MODIFIED] 从 CONFIG_GRUB_IMAGES=y 改为 CONFIG_GRUB_EFI_IMAGES=y (UEFI 专用)
+# UEFI 专用
+CONFIG_GRUB_EFI_IMAGES=y
 #CONFIG_TARGET_GRUB_PARTSIZE=4    # [REMOVED] 原配置中的这行被移除
 CONFIG_TARGET_KERNEL_PARTSIZE=64
 CONFIG_TARGET_ROOTFS_PARTSIZE=1024
@@ -19,7 +20,8 @@ CONFIG_REPRODUCIBLE_DEBUG_INFO=y
 
 # GCC
 CONFIG_TOOLCHAINOPTS=y
-CONFIG_USE_MUSL=y              # 使用 musl 标准库
+# 使用 musl 标准库
+CONFIG_USE_MUSL=y
 
 ### ZLIB
 CONFIG_ZLIB_OPTIMIZE_SPEED=y
@@ -197,7 +199,6 @@ CONFIG_PACKAGE_kmod-crypto-authenc=y
 CONFIG_PACKAGE_kmod-crypto-hash=y
 CONFIG_PACKAGE_kmod-crypto-manager=y
 CONFIG_PACKAGE_kmod-crypto-null=y
-CONFIG_PACKAGE_kmod-crypto-rng=y
 CONFIG_PACKAGE_kmod-crypto-seqiv=y
 CONFIG_PACKAGE_kmod-crypto-user=y
 CONFIG_PACKAGE_kmod-crypto-crc32c=y
@@ -223,7 +224,7 @@ CONFIG_PACKAGE_kmod-crypto-sha3=y
 # 3. 启用 PCLMULQDQ 支持 (针对你的 CPU flags: pclmulqdq)
 # 用于加速某些加密操作
 
-# 4. 启用硬件随机数生成支持 (针对你的 CPU flags: rdrand, rdseed)
+# 启用硬件随机数生成支持 (针对你的 CPU flags: rdrand, rdseed)
 # 提供更高质量的随机数和更好的性能
 CONFIG_PACKAGE_kmod-crypto-rng=y
 
@@ -265,7 +266,7 @@ CONFIG_PACKAGE_kmod-lib-lz4=y
 CONFIG_PACKAGE_kmod-lib-zstd=y
 
 ## 额外优化
-# 开启 io_uring 支持 (优化 Samba 和 现代内核 I/O 性能)
+# 暴露内核配置，便于运行时排查模块和内核能力
 CONFIG_PACKAGE_kmod-ikconfig=y
 
 # 针对 IPv6 报错的底层支持 (如果需要 IPv6)
@@ -308,10 +309,11 @@ CONFIG_PACKAGE_v2ray-geoip=y
 CONFIG_PACKAGE_v2ray-geosite=y
 
 # 基础网络工具
-CONFIG_PACKAGE_ip-full=y                       # [NEW] 完整版 ip 命令
-CONFIG_PACKAGE_tcpdump=y                       # [NEW] 网络抓包
-CONFIG_PACKAGE_nano=y                          # [NEW] 简单编辑器
-CONFIG_PACKAGE_tree=y                          # [NEW] 目录树查看
+# 完整版 ip 命令、网络抓包和轻量运维工具
+CONFIG_PACKAGE_ip-full=y
+CONFIG_PACKAGE_tcpdump=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_tree=y
 
 ## Root filesystem images
 CONFIG_TARGET_ROOTFS_EXT4FS=y
@@ -326,12 +328,14 @@ CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
 #CONFIG_GRUB_SERIAL="ttyS0"
 #CONFIG_GRUB_BAUDRATE=115200
 #CONFIG_GRUB_BOOTOPTS=""
-CONFIG_GRUB_TITLE="yunshu"                     # [MODIFIED] 改为更明确的 Hyper-V 标题
+# 保留自用镜像名称
+CONFIG_GRUB_TITLE="yunshu"
 # CONFIG_ISO_IMAGES is not set
 # CONFIG_QCOW2_IMAGES is not set
 # CONFIG_VDI_IMAGES is not set
 # CONFIG_VMDK_IMAGES is not set
-CONFIG_VHDX_IMAGES=y                           # [NEW] Hyper-V 最佳镜像格式
+# Hyper-V 最佳镜像格式
+CONFIG_VHDX_IMAGES=y
 # CONFIG_TARGET_IMAGES_GZIP is not set
 
 ## Luci
@@ -340,6 +344,7 @@ CONFIG_VHDX_IMAGES=y                           # [NEW] Hyper-V 最佳镜像格�
 ##CONFIG_PACKAGE_luci-app-diskman_INCLUDE_btrfs_progs=y
 ##CONFIG_PACKAGE_luci-app-diskman_INCLUDE_lsblk=y
 ## CONFIG_PACKAGE_luci-app-diskman_INCLUDE_mdadm is not set
-CONFIG_PACKAGE_luci-app-samba4=y                 # [KEPT] 但注意虚拟机中按需启用
+# 虚拟机中按需启用
+CONFIG_PACKAGE_luci-app-samba4=y
 CONFIG_PACKAGE_openssh-sftp-client=y
 CONFIG_PACKAGE_openssh-sftp-server=y

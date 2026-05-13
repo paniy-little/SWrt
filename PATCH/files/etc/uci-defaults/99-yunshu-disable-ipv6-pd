@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# This image is used without downstream IPv6 prefix delegation.
+# Enforce that policy on first boot after sysupgrade, including
+# upgrades that preserve the existing /etc/config/network.
+
+changed=0
+
+set_if_changed() {
+    local key="$1"
+    local value="$2"
+
+    [ "$(uci -q get "$key")" = "$value" ] && return 0
+    uci set "$key=$value"
+    changed=1
+}
+
+delete_if_present() {
+    local key="$1"
+
+    if uci -q delete "$key"; then
+        changed=1
+    fi
+}
+
+network_sections_with_option() {
+    local option="$1"
+
+    uci -q show network | sed -n "s/^network\\.\\([^.=][^=]*\\)\\.${option}=.*/\\1/p" | sort -u
+}
+
+dhcpv6_sections="$(uci -q show network | sed -n "s/^network\\.\\([^.=][^=]*\\)\\.proto='dhcpv6'.*/\\1/p" | sort -u)"
+
+for section in $dhcpv6_sections; do
+    set_if_changed "network.${section}.reqprefix" "no"
+done
+
+if [ "$(uci -q get network.wan.ipv6)" = "auto" ] && [ -z "$(uci -q get network.wan6.proto)" ]; then
+    set_if_changed "network.wan.ipv6" "1"
+    uci -q get network.wan6 >/dev/null || {
+        uci set network.wan6='interface'
+        changed=1
+    }
+    set_if_changed "network.wan6.device" "@wan"
+    set_if_changed "network.wan6.proto" "dhcpv6"
+    set_if_changed "network.wan6.reqprefix" "no"
+fi
+
+for section in $(network_sections_with_option ip6assign); do
+    delete_if_present "network.${section}.ip6assign"
+    delete_if_present "network.${section}.ip6hint"
+    delete_if_present "network.${section}.ip6class"
+done
+
+if [ "$changed" = "1" ]; then
+    uci commit network
+fi
+
+exit 0
