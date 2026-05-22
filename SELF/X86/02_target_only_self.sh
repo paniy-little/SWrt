@@ -12,12 +12,17 @@ cat > ./package/base-files/files/etc/rc.local <<'EOF'
 
 echo "Hyper-V Virtual Machine" > /tmp/sysinfo/model
 
-if [ -r /sys/devices/system/cpu/intel_pstate/status ]; then
-    status=$(cat /sys/devices/system/cpu/intel_pstate/status)
-
-    if [ "$status" = "passive" ]; then
-        echo "active" > /sys/devices/system/cpu/intel_pstate/status
+PSTATE_STATUS_FILE="/sys/devices/system/cpu/intel_pstate/status"
+if [ -f "$PSTATE_STATUS_FILE" ]; then
+    if [ "$(cat "$PSTATE_STATUS_FILE")" = "passive" ]; then
+        echo "active" > "$PSTATE_STATUS_FILE"
     fi
+    for cpu_gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        [ -f "$cpu_gov" ] && echo "powersave" > "$cpu_gov"
+    done
+    for cpu_epp in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+        [ -f "$cpu_epp" ] && echo "balance_performance" > "$cpu_epp"
+    done
 fi
 
 exit 0
