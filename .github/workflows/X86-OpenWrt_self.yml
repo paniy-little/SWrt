@@ -1,6 +1,8 @@
 name: X86-OpenWrt-Self
 
 on:
+  push:
+    branches: [ "25.12" ]
   schedule:
     - cron: '38 0 * * *'    # 每天北京时间 10:00
   workflow_dispatch:
