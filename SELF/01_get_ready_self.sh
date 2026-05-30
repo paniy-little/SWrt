@@ -45,7 +45,7 @@ lucidaednext_repo="https://github.com/QiuSimons/luci-app-daed-next"
 sbwfw876_repo="https://github.com/sbwml/openwrt_helloworld"
 sbw_pkg_repo="https://github.com/sbwml/openwrt_pkgs"
 natmap_repo="https://github.com/blueberry-pie-11/luci-app-natmap"
-upnp_bridge_relay_repo="https://github.com/yunshu/upnp-bridge-relay.git"
+upnp_bridge_relay_repo="https://github.com/hello-yunshu/upnp-bridge-relay.git"
 xwrt_repo="https://github.com/QiuSimons/openwrt-natflow"
 
 # 开始克隆仓库，并行执行
