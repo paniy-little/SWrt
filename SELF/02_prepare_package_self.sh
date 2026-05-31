@@ -235,7 +235,6 @@ mkdir -p package/new/parted && \
 wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Parted.Makefile -O package/new/parted/Makefile
 # UPnP Bridge Relay
 cp -rf ../upnp-bridge-relay/package/upnp-bridge-relay ./package/new/upnp-bridge-relay
-cp -rf ../upnp-bridge-relay/luci-app-upnp-bridge-relay ./package/new/luci-app-upnp-bridge-relay
 # IPv6 兼容助手
 patch -p1 <../PATCH/pkgs/odhcp6c/1002-odhcp6c-support-dhcpv6-hotplug.patch
 # ODHCPD

@@ -135,7 +135,6 @@ CONFIG_PACKAGE_luci-i18n-mosdns-zh-cn=y
 #CONFIG_PACKAGE_frps=y
 CONFIG_PACKAGE_luci-app-openclash=y
 CONFIG_PACKAGE_upnp-bridge-relay=y
-CONFIG_PACKAGE_luci-app-upnp-bridge-relay=y
 # CONFIG_PACKAGE_luci-app-opkg=y        # [REMOVED] 不在 final.config 中
 CONFIG_PACKAGE_luci-app-ramfree=y
 ##CONFIG_PACKAGE_luci-app-wechatpush=y 糟糕体验
