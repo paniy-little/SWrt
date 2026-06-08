@@ -160,8 +160,6 @@ rm -rf feeds/luci/applications/{luci-app-frps,luci-app-frpc,luci-app-zerotier,lu
 rm -rf feeds/packages/utils/coremark
 sed -i 's/+@KERNEL_DEBUG_INFO_BTF/+vmlinux-btf/' ./package/new/openwrt-einat-ebpf/Makefile
 git clone https://github.com/QiuSimons/vmlinux-btf ./package/new/vmlinux-btf
-git clone https://github.com/hello-yunshu/luci-app-nginx-manager ./package/new/luci-app-nginx-manager
-git clone https://github.com/hello-yunshu/use-cloudflare-ip ./package/new/use-cloudflare-ip
 
 ### 获取额外的 LuCI 应用、主题和依赖 ###
 # RK
@@ -235,8 +233,6 @@ sed -i '/boot()/,+2d' feeds/packages/net/ddns-scripts/files/etc/init.d/ddns
 cp -rf ../diskman/applications/luci-app-diskman ./package/new/luci-app-diskman
 mkdir -p package/new/parted && \
 wget https://raw.githubusercontent.com/lisaac/luci-app-diskman/master/Parted.Makefile -O package/new/parted/Makefile
-# UPnP Bridge Relay
-cp -rf ../upnp-bridge-relay/package/luci-app-upnp-bridge-relay ./package/new/luci-app-upnp-bridge-relay
 # IPv6 兼容助手
 patch -p1 <../PATCH/pkgs/odhcp6c/1002-odhcp6c-support-dhcpv6-hotplug.patch
 # ODHCPD
@@ -258,6 +254,12 @@ CONFIG_CPU_IDLE_GOV_TEO=y
 find ./target/linux/ -name "config-${KERNEL_VERSION}" | xargs -I{} sh -c "echo '$CONFIG_CONTENT' | tee -a {} > /dev/null"
 
 ##自用
+# UPnP Bridge Relay
+cp -rf ../upnp-bridge-relay/package/luci-app-upnp-bridge-relay ./package/new/luci-app-upnp-bridge-relay
+# Nginx Manager
+git clone https://github.com/hello-yunshu/luci-app-nginx-manager ./package/new/luci-app-nginx-manager
+# Cloudflare IP
+git clone https://github.com/hello-yunshu/use-cloudflare-ip ./package/new/use-cloudflare-ip
 echo -e " Yunshu Build on "$(date +%Y.%m.%d)"\n -----------------------------------------------------\n" >> package/base-files/files/etc/banner
 #补全部分依赖（实际上并不会用到
 #svn export https://github.com/openwrt/openwrt/branches/master/package/libs/libjson-c package/libs/libjson-c
