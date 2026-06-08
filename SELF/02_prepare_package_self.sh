@@ -160,6 +160,8 @@ rm -rf feeds/luci/applications/{luci-app-frps,luci-app-frpc,luci-app-zerotier,lu
 rm -rf feeds/packages/utils/coremark
 sed -i 's/+@KERNEL_DEBUG_INFO_BTF/+vmlinux-btf/' ./package/new/openwrt-einat-ebpf/Makefile
 git clone https://github.com/QiuSimons/vmlinux-btf ./package/new/vmlinux-btf
+git clone https://github.com/hello-yunshu/luci-app-nginx-manager ./package/new/luci-app-nginx-manager
+git clone https://github.com/hello-yunshu/use-cloudflare-ip ./package/new/use-cloudflare-ip
 
 ### 获取额外的 LuCI 应用、主题和依赖 ###
 # RK
