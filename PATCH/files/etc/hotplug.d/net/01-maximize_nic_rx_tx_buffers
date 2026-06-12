@@ -1,35 +1,26 @@
 #!/bin/sh
 
+[ "$ACTION" = "add" ] || exit 0
+[ -z "$DEVICENAME" ] && exit 0
+
 command -v ethtool >/dev/null 2>&1 || exit 0
 
-(
-    LOCK_FILE="/tmp/lock/net_buffer_lock"
-    if [ -f "$LOCK_FILE" ]; then
-        exit 1
-    else
-        mkdir -p /tmp/lock
-        echo $$ > "$LOCK_FILE" 2>/dev/null
-        trap 'rm -f "$LOCK_FILE"' EXIT
-        sleep 60
-        for NIC_PATH in /sys/class/net/*; do
-            NIC=$(basename "$NIC_PATH")
-            [ ! -d "/sys/class/net/$NIC/device" ] && continue
-            IF_TYPE=$(cat "/sys/class/net/$NIC/type" 2>/dev/null)
-            [ "$IF_TYPE" != "1" ] && continue
+NIC="$DEVICENAME"
 
-            ETHTOOL_G_OUTPUT=$(ethtool -g "$NIC" 2>/dev/null)
-            [ -z "$ETHTOOL_G_OUTPUT" ] && continue
-            RX_MAX=$(echo "$ETHTOOL_G_OUTPUT" | awk '/RX:/ {print $2; exit}')
-            TX_MAX=$(echo "$ETHTOOL_G_OUTPUT" | awk '/TX:/ {print $2; exit}')
-            [ -z "$RX_MAX" ] || ethtool -G "$NIC" rx "$RX_MAX"
-            [ -z "$TX_MAX" ] || ethtool -G "$NIC" tx "$TX_MAX"
+[ ! -d "/sys/class/net/$NIC/device" ] && exit 0
+[ "$(cat "/sys/class/net/$NIC/type" 2>/dev/null)" != "1" ] && exit 0
 
-            ETHTOOL_C_OUTPUT=$(ethtool -c "$NIC" 2>/dev/null)
-            if echo "$ETHTOOL_C_OUTPUT" | grep -q "Adaptive RX:"; then
-                ethtool -C "$NIC" adaptive-rx on adaptive-tx on >/dev/null 2>&1
-            fi
-        done
+ETHTOOL_G=$(ethtool -g "$NIC" 2>/dev/null)
+[ -z "$ETHTOOL_G" ] && exit 0
 
-        logger -t net-buffer "NIC buffer sizes set and adaptive coalescing attempted"
-    fi
-) &
+RX_MAX=$(echo "$ETHTOOL_G" | awk '/RX:/ {print $2; exit}')
+TX_MAX=$(echo "$ETHTOOL_G" | awk '/TX:/ {print $2; exit}')
+
+[ -n "$RX_MAX" ] && [ "$RX_MAX" != "0" ] && ethtool -G "$NIC" rx "$RX_MAX" 2>/dev/null
+[ -n "$TX_MAX" ] && [ "$TX_MAX" != "0" ] && ethtool -G "$NIC" tx "$TX_MAX" 2>/dev/null
+
+if ethtool -c "$NIC" 2>/dev/null | grep -q "Adaptive RX:"; then
+    ethtool -C "$NIC" adaptive-rx on adaptive-tx on >/dev/null 2>&1
+fi
+
+logger -t net-buffer "Maximized ring buffers for $NIC"
