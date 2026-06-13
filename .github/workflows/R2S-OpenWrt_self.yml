@@ -52,7 +52,7 @@ jobs:
     - name: Convert Translation
       run: |
         cd openwrt
-        /bin/bash 03_convert_translation.sh
+        /bin/bash ../SELF/03_convert_translation.sh
     - name: Add ACL
       run: |
         cd openwrt

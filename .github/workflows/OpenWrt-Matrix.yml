@@ -211,7 +211,7 @@ jobs:
       - name: Convert Translation
         working-directory: ${{ github.workspace }}/openwrt
         run: |
-          /bin/bash 03_convert_translation.sh
+          /bin/bash ../SELF/03_convert_translation.sh
       - name: Add ACL
         working-directory: ${{ github.workspace }}/openwrt
         run: |
