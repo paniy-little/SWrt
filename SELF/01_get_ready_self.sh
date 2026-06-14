@@ -45,7 +45,7 @@ lucidaednext_repo="https://github.com/QiuSimons/luci-app-daed-next"
 sbwfw876_repo="https://github.com/sbwml/openwrt_helloworld"
 sbw_pkg_repo="https://github.com/sbwml/openwrt_pkgs"
 natmap_repo="https://github.com/blueberry-pie-11/luci-app-natmap"
-upnp_bridge_relay_repo="https://github.com/hello-yunshu/upnp-bridge-relay.git"
+upnp_nat_relay_repo="https://github.com/hello-yunshu/luci-app-upnp-nat-relay.git"
 xwrt_repo="https://github.com/QiuSimons/openwrt-natflow"
 
 # 开始克隆仓库，并行执行
@@ -63,7 +63,7 @@ clone_repo $openwrt_add_repo master OpenWrt-Add &
 clone_repo $dockerman_repo master dockerman &
 clone_repo $docker_lib_repo master docker_lib &
 clone_repo $diskman_repo master diskman &
-clone_repo $upnp_bridge_relay_repo main upnp-bridge-relay &
+clone_repo $upnp_nat_relay_repo main luci-app-upnp-nat-relay &
 # 等待所有后台任务完成
 wait
 

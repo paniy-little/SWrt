@@ -254,12 +254,12 @@ CONFIG_CPU_IDLE_GOV_TEO=y
 find ./target/linux/ -name "config-${KERNEL_VERSION}" | xargs -I{} sh -c "echo '$CONFIG_CONTENT' | tee -a {} > /dev/null"
 
 ##自用
-# UPnP Bridge Relay
-cp -rf ../upnp-bridge-relay/package/luci-app-upnp-bridge-relay ./package/new/luci-app-upnp-bridge-relay
+# UPnP NAT Relay
+cp -rf ../luci-app-upnp-nat-relay/package/luci-app-upnp-nat-relay ./package/new/luci-app-upnp-nat-relay
 # Nginx Manager
 git clone https://github.com/hello-yunshu/luci-app-nginx-manager ./package/new/luci-app-nginx-manager
 # Cloudflare IP
-git clone https://github.com/hello-yunshu/use-cloudflare-ip ./package/new/use-cloudflare-ip
+git clone https://github.com/hello-yunshu/luci-app-cloudflare-ip ./package/new/luci-app-cloudflare-ip
 echo -e " Yunshu Build on "$(date +%Y.%m.%d)"\n -----------------------------------------------------\n" >> package/base-files/files/etc/banner
 #补全部分依赖（实际上并不会用到
 #svn export https://github.com/openwrt/openwrt/branches/master/package/libs/libjson-c package/libs/libjson-c

@@ -45,8 +45,8 @@ done
 
 for f in \
   ./package/new/luci-app-nginx-manager/Makefile \
-  ./package/new/luci-app-upnp-bridge-relay/Makefile \
-  ./package/new/use-cloudflare-ip/package/luci-app-cloudflare-ip/Makefile
+  ./package/new/luci-app-upnp-nat-relay/Makefile \
+  ./package/new/luci-app-cloudflare-ip/package/luci-app-cloudflare-ip/Makefile
 do
   [ -f "$f" ] || continue
   [ -n "$(grep 'lmo_lang="zh_Hans"' "$f")" ] && sed -i 's/lmo_lang="zh_Hans"/lmo_lang="zh-cn"/g' "$f"
