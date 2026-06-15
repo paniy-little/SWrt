@@ -73,6 +73,8 @@ cp -rf openwrt/package/libs/toolchain/Makefile /tmp/Makefile.bak
 cp -rf openwrt/package/system/procd /tmp/procd.bak
 cp -rf openwrt/package/libs/libubox /tmp/libubox.bak
 find openwrt/package/* -maxdepth 0 ! -name 'firmware' ! -name 'kernel' ! -name 'base-files' ! -name 'Makefile' -exec rm -rf {} +
+rm -rf ./openwrt/package/base-files/files/lib
+cp -rf ./openwrt_snap/package/base-files/files/lib ./openwrt/package/base-files/files/
 rm -rf ./openwrt_snap/package/firmware ./openwrt_snap/package/kernel ./openwrt_snap/package/base-files ./openwrt_snap/package/Makefile
 cp -rf ./openwrt_snap/package/* ./openwrt/package/
 cp -rf /tmp/package-pack.mk.bak ./openwrt/include/package-pack.mk
