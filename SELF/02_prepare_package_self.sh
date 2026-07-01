@@ -112,10 +112,18 @@ sed -i '/luci-app-attendedsysupgrade/d' feeds/luci/collections/luci-nginx/Makefi
 cp -rf ../PATCH/kernel/sfe/* ./target/linux/generic/hack-${KERNEL_VERSION}/
 sfe_kernel_patch="./target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
 if grep -q '^@@ -1011,6 +1011,9 @@ struct sk_buff {$' "${sfe_kernel_patch}"; then
-  perl -0pi -e 's!--- a/include/linux/skbuff\.h\n\+\+\+ b/include/linux/skbuff\.h\n@@ -1011,6 \+1011,9 @@ struct sk_buff \{\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n \t__u8\t\t\tunreadable:1;\n\+#ifdef CONFIG_SHORTCUT_FE\n\+\t__u8\t\t\tfast_forwarded:1;\n\+#endif\n #if defined\(CONFIG_NET_SCHED\) \|\| defined\(CONFIG_NET_XGRESS\)\n \t__u16\t\t\ttc_index;\t/\* traffic control index \*/\n #endif!--- a/include/linux/skbuff.h\n+++ b/include/linux/skbuff.h\n@@ -1008,6 +1008,9 @@ struct sk_buff {\n #endif\n \t__u8\t\t\tslow_gro:1;\n #if IS_ENABLED(CONFIG_IP_SCTP)\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n+#ifdef CONFIG_SHORTCUT_FE\n+\t__u8\t\t\tfast_forwarded:1;\n+#endif\n \t__u8\t\t\tunreadable:1;!s' "${sfe_kernel_patch}"
+  perl -0pi -e 's/\n--- a\/include\/linux\/skbuff\.h\n\+\+\+ b\/include\/linux\/skbuff\.h\n@@ -1011,6 \+1011,9 @@ struct sk_buff \{\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n \t__u8\t\t\tunreadable:1;\n\+#ifdef CONFIG_SHORTCUT_FE\n\+\t__u8\t\t\tfast_forwarded:1;\n\+#endif\n #if defined\(CONFIG_NET_SCHED\) \|\| defined\(CONFIG_NET_XGRESS\)\n \t__u16\t\t\ttc_index;\t\/\* traffic control index \*\/\n #endif\n/\n/s' "${sfe_kernel_patch}"
+  cat >"./target/linux/generic/hack-${KERNEL_VERSION}/954-net-shortcut-fe-skbuff-fast-forwarded.patch" <<'EOF'
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -1014,0 +1015,3 @@ struct sk_buff {
++#ifdef CONFIG_SHORTCUT_FE
++	__u8			fast_forwarded:1;
++#endif
+EOF
 fi
-if grep -A12 '^--- a/include/linux/skbuff.h' "${sfe_kernel_patch}" | grep -q '^ #if defined(CONFIG_NET_SCHED) || defined(CONFIG_NET_XGRESS)'; then
-  echo "Error: Shortcut-FE skbuff hunk still uses stale NET_SCHED context"
+if grep -q '^--- a/include/linux/skbuff.h' "${sfe_kernel_patch}"; then
+  echo "Error: stale Shortcut-FE skbuff hunk still exists in 953 patch"
   exit 1
 fi
 cp -rf ../lede/target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch ./target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch
