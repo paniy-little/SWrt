@@ -110,6 +110,14 @@ sed -i '/luci-app-attendedsysupgrade/d' feeds/luci/collections/luci-nginx/Makefi
 ### Shortcut-FE 部分 ###
 # Patch Kernel 以支持 Shortcut-FE
 cp -rf ../PATCH/kernel/sfe/* ./target/linux/generic/hack-${KERNEL_VERSION}/
+sfe_kernel_patch="./target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
+if grep -q '^@@ -1011,6 +1011,9 @@ struct sk_buff {$' "${sfe_kernel_patch}"; then
+  perl -0pi -e 's!--- a/include/linux/skbuff\.h\n\+\+\+ b/include/linux/skbuff\.h\n@@ -1011,6 \+1011,9 @@ struct sk_buff \{\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n \t__u8\t\t\tunreadable:1;\n\+#ifdef CONFIG_SHORTCUT_FE\n\+\t__u8\t\t\tfast_forwarded:1;\n\+#endif\n #if defined\(CONFIG_NET_SCHED\) \|\| defined\(CONFIG_NET_XGRESS\)\n \t__u16\t\t\ttc_index;\t/\* traffic control index \*/\n #endif!--- a/include/linux/skbuff.h\n+++ b/include/linux/skbuff.h\n@@ -1008,6 +1008,9 @@ struct sk_buff {\n #endif\n \t__u8\t\t\tslow_gro:1;\n #if IS_ENABLED(CONFIG_IP_SCTP)\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n+#ifdef CONFIG_SHORTCUT_FE\n+\t__u8\t\t\tfast_forwarded:1;\n+#endif\n \t__u8\t\t\tunreadable:1;!s' "${sfe_kernel_patch}"
+fi
+if grep -A12 '^--- a/include/linux/skbuff.h' "${sfe_kernel_patch}" | grep -q '^ #if defined(CONFIG_NET_SCHED) || defined(CONFIG_NET_XGRESS)'; then
+  echo "Error: Shortcut-FE skbuff hunk still uses stale NET_SCHED context"
+  exit 1
+fi
 cp -rf ../lede/target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch ./target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch
 # Patch LuCI 以增添 Shortcut-FE 开关
 pushd feeds/luci
