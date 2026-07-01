@@ -110,22 +110,6 @@ sed -i '/luci-app-attendedsysupgrade/d' feeds/luci/collections/luci-nginx/Makefi
 ### Shortcut-FE 部分 ###
 # Patch Kernel 以支持 Shortcut-FE
 cp -rf ../PATCH/kernel/sfe/* ./target/linux/generic/hack-${KERNEL_VERSION}/
-sfe_kernel_patch="./target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
-if grep -q '^@@ -1011,6 +1011,9 @@ struct sk_buff {$' "${sfe_kernel_patch}"; then
-  perl -0pi -e 's/\n--- a\/include\/linux\/skbuff\.h\n\+\+\+ b\/include\/linux\/skbuff\.h\n@@ -1011,6 \+1011,9 @@ struct sk_buff \{\n \t__u8\t\t\tcsum_not_inet:1;\n #endif\n \t__u8\t\t\tunreadable:1;\n\+#ifdef CONFIG_SHORTCUT_FE\n\+\t__u8\t\t\tfast_forwarded:1;\n\+#endif\n #if defined\(CONFIG_NET_SCHED\) \|\| defined\(CONFIG_NET_XGRESS\)\n \t__u16\t\t\ttc_index;\t\/\* traffic control index \*\/\n #endif\n/\n/s' "${sfe_kernel_patch}"
-  cat >"./target/linux/generic/hack-${KERNEL_VERSION}/954-net-shortcut-fe-skbuff-fast-forwarded.patch" <<'EOF'
---- a/include/linux/skbuff.h
-+++ b/include/linux/skbuff.h
-@@ -1014,0 +1015,3 @@ struct sk_buff {
-+#ifdef CONFIG_SHORTCUT_FE
-+	__u8			fast_forwarded:1;
-+#endif
-EOF
-fi
-if grep -q '^--- a/include/linux/skbuff.h' "${sfe_kernel_patch}"; then
-  echo "Error: stale Shortcut-FE skbuff hunk still exists in 953 patch"
-  exit 1
-fi
 cp -rf ../lede/target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch ./target/linux/generic/pending-${KERNEL_VERSION}/613-netfilter_optional_tcp_window_check.patch
 # Patch LuCI 以增添 Shortcut-FE 开关
 pushd feeds/luci
@@ -271,6 +255,20 @@ CONFIG_CPU_IDLE_GOV_TEO=y
 find ./target/linux/ -name "config-${KERNEL_VERSION}" | xargs -I{} sh -c "echo '$CONFIG_CONTENT' | tee -a {} > /dev/null"
 
 ##自用
+# 同步 action 会覆盖 PATCH/，这里在 SELF 自用阶段重新覆盖新版 Shortcut-FE 953 patch。
+# 优先使用已克隆的 lede 源；缺失时从 turboacc 的 package 分支取适配 tc_depth 的版本。
+sfe_kernel_patch="./target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
+lede_sfe_patch="../lede/target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
+if [ -f "${lede_sfe_patch}" ]; then
+  cp -f "${lede_sfe_patch}" "${sfe_kernel_patch}"
+else
+  curl -fsSL "https://raw.githubusercontent.com/chenmozhijin/turboacc/package/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" -o "${sfe_kernel_patch}"
+fi
+if ! grep -q '^[[:space:]]*__u8[[:space:]]*tc_depth:2;' "${sfe_kernel_patch}"; then
+  echo "Error: Shortcut-FE 953 patch is not updated for kernel ${KERNEL_VERSION}"
+  exit 1
+fi
+# Shortcut-FE 953 patch 覆盖结束，下面继续追加自用 LuCI 应用。
 # UPnP NAT Relay
 cp -rf ../luci-app-upnp-nat-relay/package/luci-app-upnp-nat-relay ./package/new/luci-app-upnp-nat-relay
 # Nginx Manager
