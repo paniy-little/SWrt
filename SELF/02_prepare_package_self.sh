@@ -321,4 +321,13 @@ sed -i 's,CONFIG_WERROR=y,# CONFIG_WERROR is not set,g' target/linux/generic/con
 ./scripts/feeds update -i
 ./scripts/feeds install -a
 
+### 清理克隆的源仓库，释放磁盘空间 ###
+# 这些仓库已在上方完成文件复制，后续编译不再需要
+rm -rf ../openwrt_snap ../immortalwrt_24 ../immortalwrt_23
+rm -rf ../lede ../lede_pkg_ma ../openwrt_ma ../openwrt_pkg_ma
+rm -rf ../OpenWrt-Add ../dockerman ../docker_lib ../diskman
+rm -rf ../luci-app-upnp-nat-relay
+echo "Disk space after cleanup:"
+df -h
+
 #exit 0
