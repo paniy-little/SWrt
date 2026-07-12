@@ -255,20 +255,6 @@ CONFIG_CPU_IDLE_GOV_TEO=y
 find ./target/linux/ -name "config-${KERNEL_VERSION}" | xargs -I{} sh -c "echo '$CONFIG_CONTENT' | tee -a {} > /dev/null"
 
 ##自用
-# 同步 action 会覆盖 PATCH/，这里在 SELF 自用阶段重新覆盖新版 Shortcut-FE 953 patch。
-# 优先使用已克隆的 lede 源；缺失时从 turboacc 的 package 分支取适配 tc_depth 的版本。
-sfe_kernel_patch="./target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
-lede_sfe_patch="../lede/target/linux/generic/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch"
-if [ -f "${lede_sfe_patch}" ]; then
-  cp -f "${lede_sfe_patch}" "${sfe_kernel_patch}"
-else
-  curl -fsSL "https://raw.githubusercontent.com/chenmozhijin/turboacc/package/hack-${KERNEL_VERSION}/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" -o "${sfe_kernel_patch}"
-fi
-if ! grep -q '^[[:space:]]*__u8[[:space:]]*tc_depth:2;' "${sfe_kernel_patch}"; then
-  echo "Error: Shortcut-FE 953 patch is not updated for kernel ${KERNEL_VERSION}"
-  exit 1
-fi
-# Shortcut-FE 953 patch 覆盖结束，下面继续追加自用 LuCI 应用。
 # UPnP NAT Relay
 cp -rf ../luci-app-upnp-nat-relay/package/luci-app-upnp-nat-relay ./package/new/luci-app-upnp-nat-relay
 # Nginx Manager
