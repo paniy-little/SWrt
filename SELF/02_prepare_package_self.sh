@@ -8,23 +8,13 @@ sed -i 's/Os/O2/g' include/target.mk
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 定义预期的内核版本
+# 定义当前 SWrt 基线内核版本。
+# 各 target 的 KERNEL_PATCHVER 校验已下沉到各自的 02_target_only_self.sh
+# （X86 读取 target/linux/x86/Makefile，rockchip 读取 target/linux/rockchip/Makefile），
+# 公共脚本只声明本脚本 patch 路径所需的内核版本常量，不再读取任何特定 target 的
+# Makefile，避免 X86 构建被 rockchip 版本门禁约束。
 SUPPORTED_KERNEL="6.12"
-
-current_version=$(sed -n 's/^KERNEL_PATCHVER:=//p' ./target/linux/rockchip/Makefile) # 如 6.12
-if [ -z "${current_version}" ]; then
-    echo "Error: Failed to extract KERNEL_PATCHVER from ./target/linux/rockchip/Makefile"
-    exit 1
-fi
-if [[ "${SUPPORTED_KERNEL}" != "${current_version}" ]]; then
-    echo "##########
-      错误：
-      编译的内核版本为 ${current_version} ，
-      预期的版本为 ${SUPPORTED_KERNEL}
-    ##########"
-    exit 1
-fi
-export KERNEL_VERSION="${SUPPORTED_KERNEL}"
+KERNEL_VERSION="${SUPPORTED_KERNEL}"
 echo "KERNEL_VERSION=${SUPPORTED_KERNEL}" | tee -a "$GITHUB_ENV" 
 # 移除 SNAPSHOT 标签
 sed -i 's,-SNAPSHOT,,g' include/version.mk

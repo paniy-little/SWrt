@@ -10,8 +10,9 @@
 # 原则：自动更新负责“发现新版本”，Release lock 负责“可复现”。
 # 维护者或 CI 在 release 前更新本文件中的 *_REF 为具体 commit SHA。
 #
-# 说明：本文件当前记录的是默认分支引用（advisory）。在正式 release 工作流中，
-# 请将 *_REF 替换为经过验证的具体 commit SHA 后再构建。
+# 说明：关键源已固定到具体 commit SHA / 不可变 tag。release 模式会真正读取本文件，
+# 若任一关键 *_REF 仍是分支（main/master/openwrt-25.12 等），构建会直接失败。
+# 下一次 release 前，由维护者重新验证并更新 *_REF 为新的具体 commit SHA。
 #
 # 强制行为（见 01_get_ready_self.sh）：
 #   - SWRT_BUILD_MODE=release 时，01_get_ready_self.sh 会真正读取本文件并据此
@@ -20,23 +21,23 @@
 #   - SWRT_BUILD_MODE=nightly（默认）时，自动跟随分支/最新 tag。
 # =============================================================================
 
-# OpenWrt 主分支：当前使用最新 release tag（动态），release 构建前应固定为具体 tag/commit
+# OpenWrt 主分支：固定到不可变 release tag
 OPENWRT_REF=v25.12.0
 
-# OpenWrt 25.12 snapshot 分支（用于复用较新的 package/base-files 等）
-OPENWRT_25_REF=openwrt-25.12
+# OpenWrt 25.12 snapshot 分支（用于复用较新的 package/base-files 等）——release 固定到 commit
+OPENWRT_25_REF=d78c0fd16dbbb1099583e6995f5438d7c695960d
 
-# OpenWrt main（用于 firewall4 等较新组件）
-OPENWRT_MAIN_REF=main
+# OpenWrt main（用于 firewall4 等较新组件）——release 固定到 commit
+OPENWRT_MAIN_REF=a27a3fea752e12b68253baafb93864b29fa46896
 
-# packages feed
-PACKAGES_REF=master
+# packages feed——release 固定到 commit
+PACKAGES_REF=e99adbc49f7a11d0377c8135fe706c7757b9e68c
 
-# LEDE（coolwswolf）用于部分 kernel patch 与包
-LEDE_REF=master
+# LEDE（coolsnowwolf）用于部分 kernel patch 与包——release 固定到 commit
+LEDE_REF=8882f211bb19277d37685456f622caed95e102bd
 
-# OpenWrt-Add（QiuSimons）
-OPENWRT_ADD_REF=master
+# OpenWrt-Add（QiuSimons）——release 固定到 commit
+OPENWRT_ADD_REF=0e88994c4089c75a5a7567222ba2dd08900fd11d
 
 # 辅助仓库（luci-app-dockerman / luci-lib-docker / luci-app-diskman / upnp-nat-relay）
 DOCKERMAN_REF=master

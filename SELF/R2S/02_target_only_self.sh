@@ -1,6 +1,19 @@
 #!/bin/bash
 clear
 
+# 内核版本校验：rockchip 目标读取自身 Makefile，与公共 SELF 解耦
+SUPPORTED_KERNEL="6.12"
+current_version="$(sed -n 's/^KERNEL_PATCHVER:=//p' ./target/linux/rockchip/Makefile)"
+if [ -z "$current_version" ]; then
+    echo "ERROR: cannot determine rockchip KERNEL_PATCHVER" >&2
+    exit 1
+fi
+if [ "$current_version" != "$SUPPORTED_KERNEL" ]; then
+    echo "ERROR: rockchip kernel mismatch: expected $SUPPORTED_KERNEL, got $current_version" >&2
+    exit 1
+fi
+echo "[SELF][R2S] rockchip kernel OK: $current_version"
+
 # 使用专属优化
 sed -i 's,-mcpu=generic,-mcpu=cortex-a53+crypto,g' include/target.mk
 

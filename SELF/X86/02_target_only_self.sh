@@ -19,7 +19,7 @@ echo "[SELF][X86] Applying common VM config"
 # x86 内核版本校验：直接读取 x86 自身的 KERNEL_PATCHVER，不依赖 rockchip。
 # 与公共 SELF 中 rockchip 的检查解耦，X86 不再因 rockchip Makefile 而失败。
 # ---------------------------------------------------------------------------
-EXPECTED_KERNEL="${KERNEL_VERSION:-6.12}"
+SUPPORTED_KERNEL="6.12"
 current_version="$(
     sed -n 's/^KERNEL_PATCHVER:=//p' ./target/linux/x86/Makefile
 )"
@@ -27,8 +27,8 @@ if [ -z "$current_version" ]; then
     echo "ERROR: cannot determine x86 KERNEL_PATCHVER" >&2
     exit 1
 fi
-if [ "$current_version" != "$EXPECTED_KERNEL" ]; then
-    echo "ERROR: x86 kernel mismatch: expected $EXPECTED_KERNEL, got $current_version" >&2
+if [ "$current_version" != "$SUPPORTED_KERNEL" ]; then
+    echo "ERROR: x86 kernel mismatch: expected $SUPPORTED_KERNEL, got $current_version" >&2
     exit 1
 fi
 echo "[SELF][X86] x86 kernel OK: $current_version"

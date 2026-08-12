@@ -4,6 +4,14 @@
 
 # 构建模式：nightly（默认，跟踪最新分支/tag）或 release（强制使用 sources.lock 的具体 tag/commit）
 SWRT_BUILD_MODE="${SWRT_BUILD_MODE:-nightly}"
+case "$SWRT_BUILD_MODE" in
+  nightly|release) ;;
+  *)
+    echo "ERROR: invalid SWRT_BUILD_MODE=$SWRT_BUILD_MODE (expected nightly or release)" >&2
+    exit 1
+    ;;
+esac
+echo "[get_ready] SWRT_BUILD_MODE=$SWRT_BUILD_MODE"
 
 # 读取 sources.lock，使其真正参与构建（release 模式必须使用其中的 *_REF）
 LOCK_FILE="$(cd "$(dirname "$0")" && pwd)/sources.lock"
@@ -113,24 +121,66 @@ if [ "$SWRT_BUILD_MODE" = "release" ]; then
     validate_release_ref "$OPENWRT_ADD_REF" "OPENWRT_ADD_REF"
 fi
 
-# 开始克隆仓库，并行执行
-clone_repo_ref $openwrt_repo "$openwrt_ref" openwrt &
-#clone_repo_ref $openwrt_repo openwrt-25.12 openwrt &
-clone_repo_ref $openwrt_repo "$openwrt_snap_ref" openwrt_snap &
-clone_repo_ref $immortalwrt_repo openwrt-24.10 immortalwrt_24 &
-clone_repo_ref $immortalwrt_repo openwrt-23.05 immortalwrt_23 &
+# 开始克隆仓库，并行执行。
+# 任一后台 clone/fetch 失败都必须让 prepare 可靠失败，而不是继续使用残缺工作目录。
+pids=()
+clone_repo_ref "$openwrt_repo" "$openwrt_ref" openwrt &
+pids+=("$!")
+clone_repo_ref "$openwrt_repo" "$openwrt_snap_ref" openwrt_snap &
+pids+=("$!")
+clone_repo_ref "$immortalwrt_repo" openwrt-24.10 immortalwrt_24 &
+pids+=("$!")
+clone_repo_ref "$immortalwrt_repo" openwrt-23.05 immortalwrt_23 &
+pids+=("$!")
+clone_repo_ref "$lede_repo" "$lede_ref" lede &
+pids+=("$!")
+clone_repo_ref "$lede_pkg_repo" master lede_pkg_ma &
+pids+=("$!")
+clone_repo_ref "$openwrt_repo" "$openwrt_ma_ref" openwrt_ma &
+pids+=("$!")
+clone_repo_ref "$openwrt_pkg_repo" "$openwrt_pkg_ma_ref" openwrt_pkg_ma &
+pids+=("$!")
+clone_repo_ref "$openwrt_add_repo" "$openwrt_add_ref" OpenWrt-Add &
+pids+=("$!")
+clone_repo_ref "$dockerman_repo" master dockerman &
+pids+=("$!")
+clone_repo_ref "$docker_lib_repo" master docker_lib &
+pids+=("$!")
+clone_repo_ref "$diskman_repo" master diskman &
+pids+=("$!")
+clone_repo_ref "$upnp_nat_relay_repo" main luci-app-upnp-nat-relay &
+pids+=("$!")
 
-clone_repo_ref $lede_repo "$lede_ref" lede &
-clone_repo_ref $lede_pkg_repo master lede_pkg_ma &
-clone_repo_ref $openwrt_repo "$openwrt_ma_ref" openwrt_ma &
-clone_repo_ref $openwrt_pkg_repo "$openwrt_pkg_ma_ref" openwrt_pkg_ma &
-clone_repo_ref $openwrt_add_repo "$openwrt_add_ref" OpenWrt-Add &
-clone_repo_ref $dockerman_repo master dockerman &
-clone_repo_ref $docker_lib_repo master docker_lib &
-clone_repo_ref $diskman_repo master diskman &
-clone_repo_ref $upnp_nat_relay_repo main luci-app-upnp-nat-relay &
-# 等待所有后台任务完成
-wait
+# 等待所有后台任务完成；任一失败即中止，避免继续使用残缺工作目录。
+failed=0
+for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+        echo "ERROR: a source repository failed to clone/fetch (pid $pid)" >&2
+        failed=1
+    fi
+done
+if [ "$failed" -ne 0 ]; then
+    echo "ERROR: one or more source repositories failed to clone/fetch" >&2
+    exit 1
+fi
+
+# 关键目录必须真实存在（防残缺工作目录）
+for d in openwrt/.git openwrt_snap/.git openwrt_ma/.git; do
+    if [ ! -d "$d" ]; then
+        echo "ERROR: expected source directory missing: $d" >&2
+        exit 1
+    fi
+done
+
+# release 模式：打印实际解析 HEAD，便于审计与后续构建 manifest
+if [ "$SWRT_BUILD_MODE" = "release" ]; then
+    echo "[SELF][SOURCE] openwrt=$(git -C openwrt rev-parse HEAD)"
+    echo "[SELF][SOURCE] openwrt_snap=$(git -C openwrt_snap rev-parse HEAD)"
+    echo "[SELF][SOURCE] openwrt_main=$(git -C openwrt_ma rev-parse HEAD)"
+    echo "[SELF][SOURCE] packages=$(git -C openwrt_pkg_ma rev-parse HEAD)"
+    echo "[SELF][SOURCE] lede=$(git -C lede rev-parse HEAD)"
+    echo "[SELF][SOURCE] openwrt_add=$(git -C OpenWrt-Add rev-parse HEAD)"
+fi
 
 # 进行一些处理
 cp -rf openwrt_snap/include/package-pack.mk /tmp/package-pack.mk.bak

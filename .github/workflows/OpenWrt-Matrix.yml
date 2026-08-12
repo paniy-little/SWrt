@@ -16,6 +16,10 @@ on:
         required: false
         type: boolean
         default: true
+      build_mode:
+        required: false
+        type: string
+        default: nightly
 
   workflow_dispatch:
     inputs:
@@ -34,6 +38,14 @@ on:
         required: false
         type: boolean
         default: true
+      build_mode:
+        description: "Build mode: nightly (track latest) or release (locked sources.lock)"
+        required: false
+        type: choice
+        options:
+          - nightly
+          - release
+        default: nightly
 
 jobs:
   setup:
@@ -80,6 +92,7 @@ jobs:
       openwrt_source_name: dummy
       TARGET_DEVICE_ARCH: dummy
       latest_release: dummy
+      SWRT_BUILD_MODE: ${{ inputs.build_mode }}
 
     runs-on: ubuntu-24.04
     # if: github.event.repository.owner.id == github.event.sender.id
@@ -396,7 +409,8 @@ jobs:
           retention-days: 5
 
       - name: Create release
-        if: inputs.build_firmware
+        # 正式 GitHub Release 只允许 release 模式创建；nightly 只上传 Actions artifact。
+        if: inputs.build_firmware && inputs.build_mode == 'release'
         id: create_release
         uses: ncipollo/release-action@v1.14.0
         with:

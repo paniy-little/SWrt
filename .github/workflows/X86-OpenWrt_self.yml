@@ -22,6 +22,14 @@ on:
         required: false
         type: string
         default: ''
+      build_mode:
+        description: "nightly: track latest sources; release: use locked sources.lock"
+        required: false
+        type: choice
+        options:
+          - nightly
+          - release
+        default: nightly
   watch:
     types: started
 
@@ -33,6 +41,8 @@ jobs:
       targets: "X86"
       upload_source: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_source }}
       build_firmware: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_firmware) || github.event_name != 'workflow_dispatch' }}
+      # 自动触发（push/schedule/watch）保持 nightly 跟踪新源；手动触发可选 nightly/release。
+      build_mode: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mode || 'nightly' }}
 
   sync_badge:
     if: inputs.badge_status != ''

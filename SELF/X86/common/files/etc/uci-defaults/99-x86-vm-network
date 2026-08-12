@@ -54,17 +54,22 @@ mac_to_iface() {
 
 wan=""
 lan=""
-# 用户显式指定 MAC：若解析不到，绝不静默回退到其它接口
+# 用户显式指定 MAC：若解析不到，绝不静默回退到其它接口。
+# 且这是“显式配置但无效”，必须 exit 1 让 uci-defaults 保留脚本，
+# 用户修正 /etc/network.env 后下一次启动可重试。
+explicit_error=0
 if [ -n "${WAN_MAC:-}" ]; then
     wan="$(mac_to_iface "$WAN_MAC")"
     if [ -z "$wan" ]; then
-        echo "WARNING: WAN_MAC '$WAN_MAC' not found among physical NICs; leaving WAN unset (no fallback)." >&2
+        echo "ERROR: WAN_MAC '$WAN_MAC' not found among physical NICs; keeping uci-defaults for retry." >&2
+        explicit_error=1
     fi
 fi
 if [ -n "${LAN_MAC:-}" ]; then
     lan="$(mac_to_iface "$LAN_MAC")"
     if [ -z "$lan" ]; then
-        echo "WARNING: LAN_MAC '$LAN_MAC' not found among physical NICs; leaving LAN unset (no fallback)." >&2
+        echo "ERROR: LAN_MAC '$LAN_MAC' not found among physical NICs; keeping uci-defaults for retry." >&2
+        explicit_error=1
     fi
 fi
 
@@ -82,10 +87,20 @@ done
 [ -n "${WAN_MAC:-}" ] || wan="${wan:-$first}"
 [ -n "${LAN_MAC:-}" ] || lan="${lan:-$second}"
 
-# WAN/LAN 不能解析或回退到同一接口，否则跳过自动初始化
+# WAN/LAN 解析或回退到同一接口
 if [ -n "$wan" ] && [ -n "$lan" ] && [ "$wan" = "$lan" ]; then
-    echo "WARNING: WAN and LAN resolved to the same interface '$wan'; skipping auto-init." >&2
+    if [ -n "${WAN_MAC:-}" ] || [ -n "${LAN_MAC:-}" ]; then
+        echo "ERROR: WAN_MAC / LAN_MAC map to the same interface '$wan'; invalid explicit mapping." >&2
+        exit 1
+    fi
+    echo "WARNING: only one NIC available; skipping auto-init." >&2
     exit 0
+fi
+
+# 显式配置无效：保留 uci-defaults 脚本，用户修正后下一次启动可重试
+if [ "$explicit_error" -ne 0 ]; then
+    echo "ERROR: explicit VM network mapping is invalid" >&2
+    exit 1
 fi
 
 # 至少要有一块网卡才初始化
