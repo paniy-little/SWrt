@@ -53,7 +53,33 @@ if ($EnableRecommended) {
     Write-Host ""
     Write-Host "Enabling recommended vRSS + VMMQ for '$VMName' ..." -ForegroundColor Yellow
     Set-VMNetworkAdapter -VMName $VMName -VrssEnabled $true -VmmqEnabled $true
-    Write-Host "Done. Re-check in guest with: swrt-vm-perf" -ForegroundColor Green
+
+    # read-back：逐个 NIC 读回实际生效状态，只有确认已启用才报 OK
+    Write-Host ""
+    Write-Host "Read-back after Set-VMNetworkAdapter:" -ForegroundColor Cyan
+    $ok = $true
+    foreach ($nic in $adapter) {
+        $cur = Get-VMNetworkAdapter -VMName $VMName -Name $nic.Name -ErrorAction SilentlyContinue
+        if (-not $cur) { $ok = $false; continue }
+        Write-Host "  $($cur.Name):"
+        Write-Host "    VrssEnabled     : $($cur.VrssEnabled)"
+        Write-Host "    VmmqEnabled     : $($cur.VmmqEnabled)"
+        Write-Host "    VmmqQueuePairs  : $($cur.VmmqQueuePairs)"
+        Write-Host "    VmqWeight       : $($cur.VmqWeight)"
+        if ($cur.VrssEnabled -eq $true -and $cur.VmmqEnabled -eq $true) {
+            Write-Host "    [OK] enabled" -ForegroundColor Green
+        } else {
+            Write-Host "    [WARN] not fully enabled" -ForegroundColor Yellow
+            $ok = $false
+        }
+    }
+    if ($ok) {
+        Write-Host ""
+        Write-Host "Re-check in guest with: swrt-vm-perf" -ForegroundColor Green
+    } else {
+        Write-Host ""
+        Write-Warning "One or more adapters did not read back as enabled. Check host NIC RSS/VMMQ capability."
+    }
 } else {
     Write-Host ""
     Write-Host "Read-only mode. To enable vRSS/VMMQ, re-run with -EnableRecommended." -ForegroundColor DarkGray

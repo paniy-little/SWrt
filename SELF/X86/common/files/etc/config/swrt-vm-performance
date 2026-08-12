@@ -1,0 +1,2 @@
+config performance 'main'
+	option packet_steering 'auto'

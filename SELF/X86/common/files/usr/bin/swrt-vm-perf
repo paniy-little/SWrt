@@ -31,57 +31,80 @@ echo "=== SWrt VM Performance Report ==="
 echo
 
 # ---------------------------------------------------------------------------
-# 4.1 VM / CPU 基础信息 + Hyper-V 检测（多信号，不依赖单一命令）
+# 4.1 VM / CPU 基础信息 + Hyper-V 检测（拆分 virtualized / hyperv）
+#
+# virtualized：任何虚拟化证据（CPU hypervisor flag、DMI Virtual Machine、
+#   VMware / KVM / QEMU / VirtualBox / Microsoft）。
+# hyperv：必须满足 Microsoft / Hyper-V 专属证据，避免把 KVM/QEMU/VMware/VBox
+#   误判成 Hyper-V。后续会根据 hyperv 是否成真决定是否走 Hyper-V 专属调优。
 # ---------------------------------------------------------------------------
 echo "Virtualization:"
-hv_signals=""
-PLEN=0
+virtualized="no"
+hyperv="no"
+hypervisor_name="unknown"
 
-# 信号 1/2：DMI 厂商与产品名
 vendor="$(read_file /sys/class/dmi/id/sys_vendor)"
 product="$(read_file /sys/class/dmi/id/product_name)"
 if [ -n "$vendor" ] && [ "$vendor" != "n/a" ]; then
     echo "  dmi vendor: $vendor"
-    case "$vendor" in
-        *icrosoft*|*yper-V*) PLEN=1;;
-    esac
 fi
 if [ -n "$product" ] && [ "$product" != "n/a" ]; then
     echo "  dmi product: $product"
-    case "$product" in
-        *irtual*|*yper-V*) PLEN=1;;
-    esac
 fi
 
-# 信号 3：/proc/cpuinfo 中是否带 hypervisor 与 Hyper-V 供应商字段
+# 1) virtualized：CPU hypervisor flag 或 DMI 虚拟化关键词
 if grep -qi "hypervisor" /proc/cpuinfo 2>/dev/null; then
-    hv_signals="$hv_signals cpuinfo-hypervisor "
+    virtualized="yes"
 fi
+case "$vendor:$product" in
+    *Virtual*|*VMware*|*KVM*|*QEMU*|*VirtualBox*|*Microsoft*|*Hyper-V*)
+        virtualized="yes" ;;
+esac
+
+# 2) hypervisor 名称：从 cpuinfo hypervisor 字段或 DMI 推断
+hypervisor_name="$(grep -m1 -oE 'hypervisor +: +[A-Za-z]+' /proc/cpuinfo 2>/dev/null | sed 's/.*hypervisor *: *//')"
+case "$vendor:$product" in
+    *Microsoft*|*Hyper-V*)
+        [ "$hypervisor_name" = "unknown" ] && hypervisor_name="Hyper-V" ;;
+    *VMware)  [ "$hypervisor_name" = "unknown" ] && hypervisor_name="VMware" ;;
+    *KVM*|*QEMU*) [ "$hypervisor_name" = "unknown" ] && hypervisor_name="KVM/QEMU" ;;
+    *VirtualBox*) [ "$hypervisor_name" = "unknown" ] && hypervisor_name="VirtualBox" ;;
+esac
+
+# 3) hyperv：仅接受 Microsoft / Hyper-V 专属证据（任一即可）
+hv_evidence=""
+# 3a) DMI vendor == Microsoft Corporation
+if [ -n "$vendor" ] && printf '%s' "$vendor" | grep -qi "Microsoft"; then
+    hv_evidence="$hv_evidence dmi-vendor-microsoft"
+fi
+# 3b) cpuinfo / dmesg 出现 Microsoft Hv
 if grep -qiE "Microsoft Hv|Hyper-V" /proc/cpuinfo 2>/dev/null; then
-    hv_signals="$hv_signals cpuinfo-hyperv "
+    hv_evidence="$hv_evidence cpuinfo-hyperv"
 fi
-
-# 信号 4：dmesg（可读时）
 if command -v dmesg >/dev/null 2>&1 && dmesg 2>/dev/null | grep -qiE "Hyper-V|hv_vmbus"; then
-    hv_signals="$hv_signals dmesg-hyperv "
+    hv_evidence="$hv_evidence dmesg-hyperv"
 fi
-
-# 信号 5：NIC 驱动是否为 hv_netvsc
+# 3c) hv_vmbus 模块存在
+if [ -d /sys/bus/vmbus ] || grep -qi "hv_vmbus" /proc/modules 2>/dev/null; then
+    hv_evidence="$hv_evidence hv_vmbus"
+fi
+# 3d) 至少一块 driver=hv_netvsc 的 NIC
 for d in /sys/class/net/*; do
     [ -d "$d" ] || continue
     name="${d##*/}"
     case "$name" in lo|br-*|docker*|veth*|tun*|tap*|vnet*|virbr*) continue;; esac
     drv="$(basename "$(readlink "$d/device/driver" 2>/dev/null)")"
-    [ "$drv" = "hv_netvsc" ] && hv_signals="$hv_signals netvsc "
+    if [ "$drv" = "hv_netvsc" ]; then
+        hv_evidence="$hv_evidence netvsc"
+        break
+    fi
 done
+[ -n "$hv_evidence" ] && hyperv="yes"
 
-hyperv_detected="no"
-if [ "$PLEN" = "1" ] || [ -n "$hv_signals" ]; then
-    hyperv_detected="yes"
-fi
-echo "  hypervisor: $(grep -m1 -oE 'hypervisor +: +[A-Za-z]+' /proc/cpuinfo 2>/dev/null | sed 's/.*hypervisor *: *//')"
-echo "  detected platform: DMI=$([ "$PLEN" = "1" ] && echo hyperv || echo unknown)"
-echo "  Hyper-V detected: $hyperv_detected${hv_signals:+ (signals:$hv_signals)}"
+[ "$virtualized" = "yes" ] && [ "$hypervisor_name" = "unknown" ] && hypervisor_name="virtualized"
+echo "  virtualized: $virtualized"
+echo "  hypervisor: $hypervisor_name"
+echo "  Hyper-V detected: $hyperv${hv_evidence:+ (evidence:$hv_evidence)}"
 echo
 
 echo "CPU:"
@@ -128,6 +151,10 @@ fi
 # ---------------------------------------------------------------------------
 # NIC 级观察循环
 # ---------------------------------------------------------------------------
+# 记录 hv_netvsc NIC 的队形，供 Recommendations 判断 RPS 是否该用。
+netvsc_nic=0     # hv_netvsc NIC 数量
+netvsc_multi=0   # 存在任意多 RX queue 的 hv_netvsc NIC 数量
+netvsc_single=0  # 存在单 RX queue 的 hv_netvsc NIC 数量
 for iface in $NICS; do
     echo "=== NIC: $iface ==="
     echo "  MAC: $(read_file "/sys/class/net/$iface/address" n/a)"
@@ -171,6 +198,16 @@ for iface in $NICS; do
         echo "  [OK] multiple RX queues detected"
     else
         echo "  [INFO] single RX queue detected"
+    fi
+
+    # 记录 hv_netvsc 队形（供 Recommendations 判断 RPS）
+    if [ "$drv" = "hv_netvsc" ]; then
+        netvsc_nic=$((netvsc_nic + 1))
+        if [ "${rx_q:-0}" -gt 1 ]; then
+            netvsc_multi=$((netvsc_multi + 1))
+        else
+            netvsc_single=$((netvsc_single + 1))
+        fi
     fi
 
     # --- 4.4 offload 状态（只报告，不强制修改）---
@@ -224,19 +261,30 @@ echo "=== IRQ / softirq ==="
 if [ -r /proc/interrupts ]; then
     echo "-- /proc/interrupts (network-related) --"
     grep -iE "hv_netvsc|vmbus|Hyper-V|virtio" /proc/interrupts 2>/dev/null | sed 's/^/  /'
-    # 尝试定位网络相关 IRQ 的 CPU 分布
-    net_irqs="$(grep -iE "hv_netvsc|vmbus|virtio" /proc/interrupts 2>/dev/null | awk '{n=NF; for(i=0;i<n-1;i++) s[i]+=$i} END {for(i=0;i<n-1;i++) printf "%d ",s[i]}')"
-    if [ -n "$net_irqs" ]; then
-        # 统计非零 CPU 列数
-        nonzero=0
-        for c in $net_irqs; do [ "$c" -gt 0 ] && nonzero=$((nonzero + 1)); done
-        if [ "$nonzero" -gt 1 ]; then
-            echo "  [OK] network work is visible on multiple CPUs"
-        else
-            echo "  [WARN] network IRQ work appears heavily concentrated on one CPU"
-        fi
-    else
+    # 从第一行确定 CPU 列数（CPU0 CPU1 ...），$1 是 IRQ label，故只累计 $2..$(cpu_count+1)
+    cpu_count="$(awk 'NR==1{for(i=1;i<=NF;i++) if($i ~ /^CPU/) n++} END{print n+0}' /proc/interrupts 2>/dev/null)"
+    if [ "${cpu_count:-0}" -lt 1 ]; then
         echo "  [INFO] unable to determine IRQ balance automatically"
+    else
+        # 仅累计 CPU counter 列，成对输出 "label 值" 供后续解析
+        net_irq="$(grep -iE "hv_netvsc|vmbus|virtio" /proc/interrupts 2>/dev/null \
+            | awk -v c="$cpu_count" '{for(i=2;i<=c+1;i++) s[i]+=$i; tot=0; for(i=2;i<=c+1;i++) tot+=$i; if(tot>0){printf $1; for(i=2;i<=c+1;i++) printf " %s", $i; printf "\n"}}')"
+        if [ -z "$net_irq" ]; then
+            echo "  [INFO] no network IRQ activity observed"
+        else
+            echo "  Network IRQ distribution (from /proc/interrupts):"
+            # 汇总各 CPU 计数
+            dist="$(echo "$net_irq" | awk -v c="$cpu_count" '{for(i=1;i<=c;i++) s[i]+=$((i+1)); tot=0; for(i=1;i<=c;i++) tot+=s[i]} END{for(i=1;i<=c;i++){printf "  CPU%d: %d\n", i-1, s[i]}}')"
+            echo "$dist"
+            # 判断是否均衡：最高 CPU 占比 > 80% 且总计数足够大 -> WARN
+            verdict="$(echo "$net_irq" | awk -v c="$cpu_count" '{for(i=1;i<=c;i++) s[i]+=$((i+1)); tot=0; for(i=1;i<=c;i++) tot+=s[i]} END{ if(tot==0){print "zero"; exit} max=0; for(i=1;i<=c;i++) if(s[i]>max) max=s[i]; pct=max*100/tot; if(tot<1000) print "low"; else if(pct>80) print "conc"; else print "ok" }')"
+            case "$verdict" in
+                ok)  echo "  [OK] network IRQ activity is distributed across multiple CPUs" ;;
+                conc) echo "  [WARN] network IRQ activity is strongly concentrated (max CPU > 80%)" ;;
+                low) echo "  [INFO] network IRQ activity is too low to judge balance" ;;
+                zero) echo "  [INFO] no network IRQ activity observed" ;;
+            esac
+        fi
     fi
 else
     echo "  /proc/interrupts: n/a"
@@ -252,24 +300,30 @@ echo
 
 # ---------------------------------------------------------------------------
 # 4.7 Softnet congestion
+#    /proc/net/softnet_stat 字段是十六进制文本（如 00000000），必须按 hex 解析，
+#    不能再用 $2 != "0" 判断，否则真实 00000000 会被当作非零 drop。
 # ---------------------------------------------------------------------------
 echo "=== Softnet (netdev) congestion ==="
 if [ -r /proc/net/softnet_stat ]; then
     echo "  (raw rows: [cpu] processed dropped time_squeeze ...)"
-    # BusyBox 下十六进制转换可能受限：优先显示 raw 并说明，保证正确优先。
     awk '{ printf "  cpu %d processed=0x%s dropped=0x%s time_squeeze=0x%s\n", NR-1, $1, $2, $3 }' /proc/net/softnet_stat 2>/dev/null | head -n 8
-    # 尝试用 printf 做 hex->dec 汇总（若 BusyBox 支持 %d 解析）
-    # 用 awk 的 strtonum 不可靠，故这里仅做 text 汇总，observer 自行判断。
-    dropped_total="$(awk '{s+=$2} END{if(s) printf "%d", s}' /proc/net/softnet_stat 2>/dev/null)"
-    if [ -n "$dropped_total" ] && [ "$dropped_total" != "0" ]; then
-        # 若累积为 0 则不提示
-        :
-    fi
-    # 保守判断：若第 2 列（dropped）全为 0，则无 softnet drop
-    if awk '{ if ($2 != "0" && $2 != "0x0") { f=1 } } END { exit f }' /proc/net/softnet_stat 2>/dev/null; then
+    # BusyBox awk 可用的十六进制转十进制函数
+    read -r soft_processed soft_dropped soft_squeeze <<EOF
+$(awk 'function hex2dec(h,    i,c,v,n){
+        h=tolower(h); sub(/^0x/,"",h); n=0;
+        for(i=1;i<=length(h);i++){ c=substr(h,i,1); v=index("0123456789abcdef",c)-1;
+            if(v<0) return -1; n=n*16+v }
+        return n }
+      { p+=hex2dec($1); d+=hex2dec($2); s+=hex2dec($3) }
+      END{ printf "%d %d %d\n", p, d, s }' /proc/net/softnet_stat 2>/dev/null)
+EOF
+    echo "  processed total: ${soft_processed:-0}"
+    echo "  dropped total: ${soft_dropped:-0}"
+    echo "  time_squeeze total: ${soft_squeeze:-0}"
+    if [ "${soft_dropped:-0}" = "0" ]; then
         echo "  [OK] no softnet drops observed"
     else
-        echo "  [WARN] softnet drops observed; backlog/RSS/CPU distribution deserves testing"
+        echo "  [WARN] softnet drops observed: ${soft_dropped} (backlog/RSS/CPU distribution deserves testing)"
     fi
 else
     echo "  /proc/net/softnet_stat: n/a"
@@ -314,5 +368,37 @@ else
 fi
 echo
 
+# ---------------------------------------------------------------------------
+# 4.11 Recommendations —— 仅基于可证明的状态给建议，不做动静推断
+# ---------------------------------------------------------------------------
+echo "=== Recommendations ==="
+
+# TCP 拥塞控制与 BBR3 可用性（供本机 endpoint A/B）
+tcp_cc="$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)"
+bbr_avail="no"
+if [ -r /proc/sys/net/ipv4/tcp_available_congestion_control ]; then
+    grep -qi "bbr" /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null && bbr_avail="yes"
+fi
+echo "  current TCP CC: ${tcp_cc:-unknown}"
+if [ "$bbr_avail" = "yes" ] && [ "$tcp_cc" != "bbr" ]; then
+    echo "  [INFO] BBR3 is available for local-endpoint A/B testing (not forced)."
+fi
+
+# Packet steering 建议（基于 hv_netvsc 队形 + hyperv + vCPU）
+if [ "$netvsc_multi" -gt 0 ]; then
+    echo "  [OK] hv_netvsc multiqueue active; software RPS is not recommended."
+elif [ "$netvsc_single" -gt 0 ]; then
+    if [ "$hyperv" = "yes" ] && [ "${vcpus:-0}" -gt 1 ]; then
+        echo "  [INFO] Hyper-V detected, ${vcpus} vCPU, single RX queue; Packet Steering auto mode is appropriate."
+    else
+        echo "  [INFO] single RX queue hv_netvsc; Packet Steering auto mode may be considered only if Hyper-V + multi-vCPU."
+    fi
+fi
+
+# softnet drop delta 无法从单次快照推断
+echo "  [OK] softnet dropped delta cannot be inferred from a one-time snapshot."
+echo "  Use the A/B test script under load before increasing backlog."
+
+echo
 echo "=== End of report (read-only; nothing was modified) ==="
 exit 0

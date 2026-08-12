@@ -61,19 +61,26 @@ SELF/X86/
 | nftables flow offload | 保留 | 由 firewall4/LuCI 控制 |
 | x86-64-v2/v3 | 默认关闭 | 保持 generic，保证跨宿主机迁移 |
 | swrt-vm-perf | 只读诊断 | `usr/bin/swrt-vm-perf`，观察 RSS/queue/offload/IRQ/softnet，绝不自动修改 |
-| ring/coalescing 自动加固 | opt-in | X86 默认不再最大化 ring；由 `/etc/config/swrt-vm-performance` 的 `auto_tune_ring=1` 显式开启 |
+| hv_netvsc ring | 默认 1024/1024 | 仅对 `hv_netvsc` 生效，供 Hyper-V; 其它驱动保持默认; 不超出 driver maximum |
+| ip_local_port_range | 默认 10240-65535 | `sysctl.d/90-swrt-x86-network.conf`，利于本机主动连接（OpenClash/DDNS/下载器） |
+| Packet Steering | auto | 复用 OpenWrt 自带 packet_steering; Hyper-V single-RX-queue + 多 vCPU 时自动启用，multiqueue/vRSS 时不叠加 RPS |
 
 ## VM 网络性能定位
 
 - **默认只读**：`swrt-vm-perf` 只观测并报告，不修改任何参数。它枚举真实 Ethernet NIC，
   输出 Hyper-V/KVM 检测、queue/RSS、offload、IRQ/softirq 分布、RPS/XPS mask、
   softnet 拥塞、ring/coalescing、当前 forwarding fast path 与 conntrack 信息。
-- **不默认开启**：RPS、irqbalance、超大 backlog、64MB socket buffer、conntrack 大数
-  均为条件性建议，只有在 `swrt-vm-perf` 检测到真实瓶颈（例如单 CPU NET_RX 饱和、
-  softnet drops）且宿主侧 VMMQ/vRSS 已排查后才考虑 A/B。
+- **Packet Steering auto**：`/etc/config/swrt-vm-performance` 的 `packet_steering` 默认
+  `auto`。仅当 Hyper-V + vCPU>1 + hv_netvsc single-RX-queue 时，复用 OpenWrt 自带的
+  `packet_steering`（RPS）; 若 hv_netvsc 已多队列（vRSS/VMMQ 生效）则不叠加 RPS。
+  用户可显式 `on` / `off` 覆盖。
+- **不默认开启**：irqbalance、超大 backlog、64MB socket buffer、busy_poll、
+  tx_queue_len=10000、全局 FQ、强制 BBR3、强制 SFO/SFE 均保持测试驱动，只有在
+  `swrt-vm-perf` 检测到真实瓶颈（例如单 CPU NET_RX 饱和、softnet drops）且宿主侧
+  VMMQ/vRSS 已排查后才考虑 A/B。
 - **Hyper-V 优先处理宿主侧**：Host NIC RSS → vSwitch VMMQ → VM vRSS → hv_netvsc
-  multi-queue → OpenWrt。不要在 guest 内用 RPS 掩盖宿主 RSS/VMMQ 未配置。
-  具体检查命令见 [hyperv/README.md](hyperv/README.md)。
+  multi-queue → OpenWrt。宿主侧配好 vRSS/VMMQ 后，guest 内的 Packet Steering auto
+  会自动不叠加 RPS。具体检查命令见 [hyperv/README.md](hyperv/README.md)。
 - **fast path 互斥**：Baseline / Software Flow Offload / Hardware Flow Offload /
   Shortcut-FE 由 LuCI 互斥选择，不强制叠加。性能对比建议按
   `None → Software Flow Offload → Shortcut-FE` 逐一实测，不以理论宣称快慢。

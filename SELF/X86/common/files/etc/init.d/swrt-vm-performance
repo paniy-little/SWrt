@@ -1,0 +1,118 @@
+#!/bin/sh /etc/rc.common
+# =============================================================================
+# SELF/X86：VM 网络性能自适应（Packet Steering auto）
+#
+# 只做一件事：根据 Hyper-V + hv_netvsc 队形，决定是否复用 OpenWrt 自带的
+# Packet Steering（network.@globals[0].packet_steering）。
+#
+# 规则：
+#   - packet_steering=off -> 明确关闭（不覆盖，仅当由 SWrt auto 管理过才处理）
+#   - packet_steering=on  -> 明确启用
+#   - packet_steering=auto（默认）-> 自动判断：
+#        仅当 [Hyper-V 检测为 yes] 且 [vCPU > 1] 且 [存在 hv_netvsc NIC]
+#        且 [所有 hv_netvsc routing NIC 只有 1 个 RX queue] 时，才把
+#        packet_steering 设为 2（复用 OpenWrt RPS）。
+#        若 hv_netvsc 已是多 RX queue（vRSS/VMMQ 生效），则 auto 不叠加 RPS，
+#        把 packet_steering 设为 0（仅当该值由 SWrt auto 管理才覆盖，不碰用户 on/off）。
+#
+# 不默认开启：irqbalance、大 backlog、大 socket buffer、busy_poll 等。
+# =============================================================================
+
+START=99
+
+use_procd=0
+
+start() {
+    # 网络基本可用后再执行（init.d 默认晚于 network）
+    [ -x /etc/init.d/packet_steering ] || { logger -t swrt-vm-perf "packet_steering init missing; skip"; return 0; }
+
+    MODE="$(uci -q get swrt-vm-performance.@performance[0].packet_steering 2>/dev/null)"
+    [ -n "$MODE" ] || MODE="auto"
+
+    case "$MODE" in
+        on)
+            uci -q set network.@globals[0].packet_steering='2'
+            uci -q commit network
+            logger -t swrt-vm-perf "[SWrt][perf] packet steering: on (user override)"
+            /etc/init.d/packet_steering restart >/dev/null 2>&1
+            return 0
+            ;;
+        off)
+            uci -q set network.@globals[0].packet_steering='0'
+            uci -q commit network
+            logger -t swrt-vm-perf "[SWrt][perf] packet steering: off (user override)"
+            /etc/init.d/packet_steering restart >/dev/null 2>&1
+            return 0
+            ;;
+        auto)
+            ;;
+        *)
+            logger -t swrt-vm-perf "[SWrt][perf] unknown packet_steering mode '$MODE'; treating as auto"
+            MODE="auto"
+            ;;
+    esac
+
+    # ---- auto：判断是否叠加 RPS ----
+    # 之前是否由 SWrt auto 管理（避免覆盖用户显式 on/off）
+    prev="$(uci -q get network.@globals[0].packet_steering 2>/dev/null)"
+    # 若用户显式设置了非 auto 期望值，且不是我们写过的 0/2，则不覆盖
+    # （本脚本只管理 0 和 2 两个值；其它值视为用户手动配置）
+
+    # Hyper-V 检测
+    hyperv="no"
+    vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null)"
+    if printf '%s' "$vendor" | grep -qi "Microsoft"; then hyperv="yes"; fi
+    if grep -qiE "Microsoft Hv|Hyper-V" /proc/cpuinfo 2>/dev/null; then hyperv="yes"; fi
+    if [ -d /sys/bus/vmbus ]; then hyperv="yes"; fi
+
+    # vCPU 数
+    vcpus=0
+    for c in /sys/devices/system/cpu/cpu[0-9]*; do [ -d "$c" ] && vcpus=$((vcpus + 1)); done
+    [ "$vcpus" -eq 0 ] && vcpus="$(nproc 2>/dev/null || echo 1)"
+
+    # hv_netvsc NIC 队形
+    netvsc_nic=0
+    netvsc_multi=0
+    netvsc_single=0
+    for d in /sys/class/net/*; do
+        [ -d "$d" ] || continue
+        name="${d##*/}"
+        case "$name" in lo|br-*|docker*|veth*|tun*|tap*|vnet*|virbr*) continue;; esac
+        drv="$(basename "$(readlink "$d/device/driver" 2>/dev/null)")"
+        [ "$drv" = "hv_netvsc" ] || continue
+        netvsc_nic=$((netvsc_nic + 1))
+        rx=$(ls -d "$d/queues/"rx-* 2>/dev/null | wc -l | tr -d ' ')
+        if [ "${rx:-0}" -gt 1 ]; then
+            netvsc_multi=$((netvsc_multi + 1))
+        else
+            netvsc_single=$((netvsc_single + 1))
+        fi
+    done
+
+    if [ "$hyperv" = "yes" ] && [ "$vcpus" -gt 1 ] && [ "$netvsc_nic" -gt 0 ] && [ "$netvsc_multi" -eq 0 ]; then
+        # vRSS/VMMQ 未生效（单 RX queue）+ 多 vCPU -> 启用 OpenWrt RPS
+        uci -q set network.@globals[0].packet_steering='2'
+        uci -q commit network
+        logger -t swrt-vm-perf "[SWrt][perf] packet steering auto: enabled (${vcpus} vCPU, hv_netvsc single RX queue)"
+        /etc/init.d/packet_steering restart >/dev/null 2>&1
+    elif [ "$netvsc_multi" -gt 0 ]; then
+        # hv_netvsc 已是多 RX queue（vRSS/VMMQ 生效）-> auto 不叠加 RPS
+        # 仅当当前值是被 SWrt auto 管理的（0 或 2）时才覆盖为 0
+        if [ "$prev" = "0" ] || [ "$prev" = "2" ] || [ -z "$prev" ]; then
+            uci -q set network.@globals[0].packet_steering='0'
+            uci -q commit network
+            logger -t swrt-vm-perf "[SWrt][perf] packet steering auto: skipped (hv_netvsc multiqueue active)"
+            /etc/init.d/packet_steering restart >/dev/null 2>&1
+        else
+            logger -t swrt-vm-perf "[SWrt][perf] packet steering auto: kept user value '$prev' (multiqueue active)"
+        fi
+    else
+        logger -t swrt-vm-perf "[SWrt][perf] packet steering auto: not applicable (hyperv=$hyperv vcpus=$vcpus netvsc=$netvsc_nic)"
+    fi
+    return 0
+}
+
+stop() {
+    # 不主动关闭；由用户显式 off 或重新 auto 决定
+    return 0
+}

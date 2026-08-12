@@ -68,8 +68,14 @@ set -e
 # 仅用于定位，不因此放宽任何门禁判定。
 mapfile -t nics < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
 FATAL_MARKER="$(grep -oE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG" | head -n1 || true)"
+# init complete 诊断：干净输出，不重复打印 0
+if grep -q 'init complete' "$LOG"; then
+    INIT_COMPLETE="yes"
+else
+    INIT_COMPLETE="no"
+fi
 echo "[smoke] qemu exit=${QEMU_EXIT}"
-echo "[smoke] init complete=$([ "$(grep -c 'init complete' "$LOG" 2>/dev/null || echo 0)" -gt 0 ] && echo yes || echo no)"
+echo "[smoke] init complete=${INIT_COMPLETE}"
 echo "[smoke] NICs=${nics[*]:-none}"
 echo "[smoke] fatal marker=${FATAL_MARKER:-none}"
 echo "[smoke] ---- boot log tail ----"

@@ -1,18 +1,17 @@
 #!/bin/sh
 # =============================================================================
-# SELF/X86 覆盖版：NIC ring / coalescing 处理（默认只读，opt-in 才修改）
+# SELF/X86 覆盖版：Hyper-V hv_netvsc ring 默认调优（RX/TX = 1024/1024）
 #
 # 说明：
 #   - 本文件位于 SELF/X86/common/files，覆盖 PATCH/files 同名脚本（仅 X86 生效，
 #     Rockchip 行为不受影响）。
-#   - 历史脚本会在 interface add 时无条件把 RX/TX ring 拉到最大并强开 adaptive
-#     coalescing。这并非被证据支持的通用最佳值，可能增加 queueing / memory /
-#     latency。
-#   - 因此 X86 默认不再自动修改任何 ring/coalescing。是否优化由用户显式开启：
-#       /etc/config/swrt-vm-performance
-#         option auto_tune_ring '1'
-#     只有 auto_tune_ring=1 时才执行最大化 ring + adaptive coalescing。
-#   - 诊断请使用只读工具 swrt-vm-perf 观察队列 / RSS / offload / softnet。
+#   - 只对 driver == hv_netvsc 处理。virtio/e1000/igc/ixgbe/物理 PCI NIC 全部
+#     保持 driver/upstream 默认，绝不改动。
+#   - 目标：当 ethtool -g 证明 Pre-set maximums 支持时才设 RX=1024 / TX=1024。
+#     某方向 maximum < 1024 则保持当前值，绝不设置超出 maximum。
+#   - 不再做：driver maximum、adaptive-rx on、adaptive-tx on、对所有 Ethernet NIC 处理。
+#   - 若驱动不支持 ethtool -G 或解析失败：安全 no-op，不影响启动。
+#   - 诊断请用只读工具 swrt-vm-perf 观察队列 / RSS / offload / softnet。
 # =============================================================================
 
 [ "$ACTION" = "add" ] || exit 0
@@ -20,27 +19,40 @@
 
 command -v ethtool >/dev/null 2>&1 || exit 0
 
-# opt-in 开关：默认关闭，绝不静默修改
-AUTO_TUNE_RING="$(uci -q get swrt-vm-performance.@global[0].auto_tune_ring 2>/dev/null)"
-[ "$AUTO_TUNE_RING" = "1" ] || exit 0
-
 NIC="$DEVICENAME"
 
 [ ! -d "/sys/class/net/$NIC/device" ] && exit 0
 [ "$(cat "/sys/class/net/$NIC/type" 2>/dev/null)" != "1" ] && exit 0
 
-ETHTOOL_G=$(ethtool -g "$NIC" 2>/dev/null)
-[ -z "$ETHTOOL_G" ] && exit 0
-
-RX_MAX=$(echo "$ETHTOOL_G" | awk '/RX:/ {print $2; exit}')
-TX_MAX=$(echo "$ETHTOOL_G" | awk '/TX:/ {print $2; exit}')
-
-[ -n "$RX_MAX" ] && [ "$RX_MAX" != "0" ] && ethtool -G "$NIC" rx "$RX_MAX" 2>/dev/null
-[ -n "$TX_MAX" ] && [ "$TX_MAX" != "0" ] && ethtool -G "$NIC" tx "$TX_MAX" 2>/dev/null
-
-if ethtool -c "$NIC" 2>/dev/null | grep -q "Adaptive RX:"; then
-    ethtool -C "$NIC" adaptive-rx on adaptive-tx on >/dev/null 2>&1
+# 只处理 hv_netvsc
+DRIVER="$(ethtool -i "$NIC" 2>/dev/null | awk -F: '/^driver:/ {gsub(/^ +| +$/,"",$2); print $2; exit}')"
+if [ "$DRIVER" != "hv_netvsc" ]; then
+    exit 0
 fi
 
-logger -t net-buffer "Opt-in: maximized ring buffers for $NIC (auto_tune_ring=1)"
+# 解析 Pre-set maximums 中的 RX/TX（明确取 maximum 部分，不误拿 Current settings）
+read -r RX_MAX TX_MAX <<EOF
+$(ethtool -g "$NIC" 2>/dev/null | awk '/Pre-set maximums:/{in=1; next} /Current hardware settings:/{in=0} in && /^RX:/{rx=$2} in && /^TX:/{tx=$2} END{print rx+0, tx+0}')
+EOF
+
+# 解析失败：no-op + 日志，不修改
+if [ -z "$RX_MAX" ] || [ -z "$TX_MAX" ] || [ "$RX_MAX" = "0" ] || [ "$TX_MAX" = "0" ]; then
+    logger -t net-buffer "SWrt: cannot parse pre-set maximums for $NIC; no-op"
+    exit 0
+fi
+
+# 目标 ring = 1024 / 1024，但绝不超出 maximum
+RX_TARGET=1024
+TX_TARGET=1024
+[ "$RX_MAX" -lt "$RX_TARGET" ] && RX_TARGET=""   # max < 1024 -> 保持当前
+[ "$TX_MAX" -lt "$TX_TARGET" ] && TX_TARGET=""   # max < 1024 -> 保持当前
+
+if [ -n "$RX_TARGET" ]; then
+    ethtool -G "$NIC" rx "$RX_TARGET" >/dev/null 2>&1
+fi
+if [ -n "$TX_TARGET" ]; then
+    ethtool -G "$NIC" tx "$TX_TARGET" >/dev/null 2>&1
+fi
+
+logger -t net-buffer "SWrt Hyper-V NIC tuning: $NIC hv_netvsc ring rx=${RX_TARGET:-keep} tx=${TX_TARGET:-keep}"
 exit 0
