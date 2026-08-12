@@ -12,6 +12,12 @@
 #
 # 说明：本文件当前记录的是默认分支引用（advisory）。在正式 release 工作流中，
 # 请将 *_REF 替换为经过验证的具体 commit SHA 后再构建。
+#
+# 强制行为（见 01_get_ready_self.sh）：
+#   - SWRT_BUILD_MODE=release 时，01_get_ready_self.sh 会真正读取本文件并据此
+#     克隆关键源；若关键 *_REF 仍是分支（main/master/openwrt-25.12 等），
+#     构建会直接失败，避免“伪 lock”。
+#   - SWRT_BUILD_MODE=nightly（默认）时，自动跟随分支/最新 tag。
 # =============================================================================
 
 # OpenWrt 主分支：当前使用最新 release tag（动态），release 构建前应固定为具体 tag/commit

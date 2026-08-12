@@ -2,14 +2,61 @@
 
 # 这个脚本的作用是从不同的仓库中克隆openwrt相关的代码，并进行一些处理
 
-# 定义一个函数，用来克隆指定的仓库和分支
-clone_repo() {
-  # 参数1是仓库地址，参数2是分支名，参数3是目标目录
+# 构建模式：nightly（默认，跟踪最新分支/tag）或 release（强制使用 sources.lock 的具体 tag/commit）
+SWRT_BUILD_MODE="${SWRT_BUILD_MODE:-nightly}"
+
+# 读取 sources.lock，使其真正参与构建（release 模式必须使用其中的 *_REF）
+LOCK_FILE="$(cd "$(dirname "$0")" && pwd)/sources.lock"
+if [ -f "$LOCK_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$LOCK_FILE"
+    set +a
+    echo "[get_ready] Loaded sources.lock (mode=$SWRT_BUILD_MODE)"
+else
+    echo "[get_ready] WARNING: sources.lock not found; using default branches" >&2
+fi
+
+# 克隆辅助：ref 可为 branch / tag / 40 位 commit SHA
+clone_repo_ref() {
   repo_url=$1
-  branch_name=$2
+  ref=$2
   target_dir=$3
-  # 克隆仓库到目标目录，并指定分支名和深度为1
-  git clone -b $branch_name --depth 1 $repo_url $target_dir
+
+  if printf '%s' "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+    # 具体 commit SHA：克隆后 detach 到该 commit
+    git clone --filter=blob:none --no-checkout "$repo_url" "$target_dir"
+    git -C "$target_dir" fetch --depth 1 origin "$ref"
+    git -C "$target_dir" checkout --detach FETCH_HEAD
+  else
+    # 分支或 tag
+    git clone -b "$ref" --depth 1 "$repo_url" "$target_dir"
+  fi
+}
+
+# release 模式：拒绝“分支式伪 lock”，要求明确 tag/commit
+validate_release_ref() {
+  ref=$1
+  name=$2
+  if [ -z "$ref" ]; then
+    echo "ERROR: [$name] release mode requires a concrete tag/commit in sources.lock" >&2
+    exit 1
+  fi
+  case "$ref" in
+    main|master|openwrt-25.12|openwrt-24.10|openwrt-23.05)
+      echo "ERROR: [$name] release mode forbids branch ref '$ref' (use tag/commit)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# 按模式选择 ref：$1=nightly 默认, $2=release lock ref
+pick_ref() {
+  if [ "$SWRT_BUILD_MODE" = "release" ]; then
+    echo "$2"
+  else
+    echo "$1"
+  fi
 }
 
 # 定义一些变量，存储仓库地址和分支名
@@ -48,22 +95,40 @@ natmap_repo="https://github.com/blueberry-pie-11/luci-app-natmap"
 upnp_nat_relay_repo="https://github.com/hello-yunshu/luci-app-upnp-nat-relay.git"
 xwrt_repo="https://github.com/QiuSimons/openwrt-natflow"
 
-# 开始克隆仓库，并行执行
-clone_repo $openwrt_repo $latest_release openwrt &
-#clone_repo $openwrt_repo openwrt-25.12 openwrt &
-clone_repo $openwrt_repo openwrt-25.12 openwrt_snap &
-clone_repo $immortalwrt_repo openwrt-24.10 immortalwrt_24 &
-clone_repo $immortalwrt_repo openwrt-23.05 immortalwrt_23 &
+# 关键源按模式选择 ref（nightly 用分支/最新 tag，release 用 sources.lock）
+openwrt_ref="$(pick_ref "$latest_release" "${OPENWRT_REF:-}")"
+openwrt_snap_ref="$(pick_ref "openwrt-25.12" "${OPENWRT_25_REF:-}")"
+openwrt_ma_ref="$(pick_ref "main" "${OPENWRT_MAIN_REF:-}")"
+openwrt_pkg_ma_ref="$(pick_ref "master" "${PACKAGES_REF:-}")"
+lede_ref="$(pick_ref "master" "${LEDE_REF:-}")"
+openwrt_add_ref="$(pick_ref "master" "${OPENWRT_ADD_REF:-}")"
 
-clone_repo $lede_repo master lede &
-clone_repo $lede_pkg_repo master lede_pkg_ma &
-clone_repo $openwrt_repo main openwrt_ma &
-clone_repo $openwrt_pkg_repo master openwrt_pkg_ma &
-clone_repo $openwrt_add_repo master OpenWrt-Add &
-clone_repo $dockerman_repo master dockerman &
-clone_repo $docker_lib_repo master docker_lib &
-clone_repo $diskman_repo master diskman &
-clone_repo $upnp_nat_relay_repo main luci-app-upnp-nat-relay &
+# release 模式校验：关键源必须是具体 tag/commit，不允许分支伪 lock
+if [ "$SWRT_BUILD_MODE" = "release" ]; then
+    validate_release_ref "$OPENWRT_REF" "OPENWRT_REF"
+    validate_release_ref "$OPENWRT_25_REF" "OPENWRT_25_REF"
+    validate_release_ref "$OPENWRT_MAIN_REF" "OPENWRT_MAIN_REF"
+    validate_release_ref "$PACKAGES_REF" "PACKAGES_REF"
+    validate_release_ref "$LEDE_REF" "LEDE_REF"
+    validate_release_ref "$OPENWRT_ADD_REF" "OPENWRT_ADD_REF"
+fi
+
+# 开始克隆仓库，并行执行
+clone_repo_ref $openwrt_repo "$openwrt_ref" openwrt &
+#clone_repo_ref $openwrt_repo openwrt-25.12 openwrt &
+clone_repo_ref $openwrt_repo "$openwrt_snap_ref" openwrt_snap &
+clone_repo_ref $immortalwrt_repo openwrt-24.10 immortalwrt_24 &
+clone_repo_ref $immortalwrt_repo openwrt-23.05 immortalwrt_23 &
+
+clone_repo_ref $lede_repo "$lede_ref" lede &
+clone_repo_ref $lede_pkg_repo master lede_pkg_ma &
+clone_repo_ref $openwrt_repo "$openwrt_ma_ref" openwrt_ma &
+clone_repo_ref $openwrt_pkg_repo "$openwrt_pkg_ma_ref" openwrt_pkg_ma &
+clone_repo_ref $openwrt_add_repo "$openwrt_add_ref" OpenWrt-Add &
+clone_repo_ref $dockerman_repo master dockerman &
+clone_repo_ref $docker_lib_repo master docker_lib &
+clone_repo_ref $diskman_repo master diskman &
+clone_repo_ref $upnp_nat_relay_repo main luci-app-upnp-nat-relay &
 # 等待所有后台任务完成
 wait
 
