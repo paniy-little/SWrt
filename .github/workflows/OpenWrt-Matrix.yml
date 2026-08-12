@@ -146,7 +146,9 @@ jobs:
 
       - name: Maximize build space
         if: inputs.build_firmware
-        uses: smallprogram/maximize-build-space@v2
+        # 固定到已包含 /mnt 非独立挂载检测修复的 commit；避免 @v2 旧实现
+        # 在 Ubuntu 24.04 上执行 sudo umount /mnt 报 "not mounted" (exit 32)。
+        uses: smallprogram/maximize-build-space@16007771e4642069097fc3e7444638474e5db178
         with:
           swap-size-mb: 1024
           temp-reserve-mb: 4608
@@ -300,16 +302,15 @@ jobs:
         working-directory: ${{ github.workspace }}/openwrt
         id: compileopenwrt
         run: |
-          set +e
-          make -j$(($(nproc) + 1))
-          status=$?
-          if [ $status -ne 0 ]; then
-            echo "Parallel build FAILED (status=$status). Dumping config and retrying serial for diagnostics."
+          if ! make -j$(($(nproc) + 1)); then
+            echo "Parallel build FAILED; dumping config and retrying serial for diagnostics."
             cat ./.config
             echo '================================================================'
-            make -j1 V=s
-            echo "==== Serial diagnostic finished. Build FAILED. ===="
-            exit 1
+            if ! make -j1 V=s; then
+              echo "::error::Serial build also failed"
+              exit 1
+            fi
+            echo "Serial retry succeeded."
           fi
           echo "compile_status=0" >> "$GITHUB_OUTPUT"
 
@@ -326,6 +327,11 @@ jobs:
           fi
           if [ ${#vhdx[@]} -eq 0 ] || [ ! -s "${vhdx[0]}" ]; then
             echo "::error::X86 combined-efi.vhdx artifact missing or empty"; exit 1
+          fi
+          # 若已安装 qemu-utils，额外确认 VHDX 可被 qemu-img 解析
+          if command -v qemu-img >/dev/null 2>&1; then
+            qemu-img info "${vhdx[0]}" >/dev/null
+            echo "VHDX parse OK via qemu-img info"
           fi
           echo "X86 artifacts OK: ${ext4[0]} ${vhdx[0]}"
 
