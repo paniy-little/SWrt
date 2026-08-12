@@ -1,0 +1,318 @@
+#!/bin/sh
+# =============================================================================
+# swrt-vm-perf — SWrt x86 VM 网络性能只读诊断工具
+#
+# 设计原则：
+#   - 默认【只读】。绝不自动修改 IRQ affinity / RPS / XPS / ring size /
+#     coalescing / sysctl / firewall / SFE / software flow offload / CPU governor。
+#   - 兼容 BusyBox /bin/sh（ash），不依赖 Bash 特性。
+#   - 任何一块网卡或子系统不支持时，输出 "unsupported" 并继续，绝不报错退出。
+#   - 判断保持克制：只有证据充分才给 OK / WARN，否则给 INFO。
+#
+# 用法：
+#   swrt-vm-perf
+# =============================================================================
+
+# 所有 ethtool 调用都要求 ethtool 存在；缺失时统一降级为 sysfs 观察。
+HAS_ETHTOOL=0
+command -v ethtool >/dev/null 2>&1 && HAS_ETHTOOL=1
+
+# 安全读取文件，缺失时输出 fallback
+read_file() {
+    # $1 = path, $2 = fallback
+    if [ -r "$1" ]; then
+        cat "$1" 2>/dev/null
+    else
+        echo "${2:-n/a}"
+    fi
+}
+
+echo "=== SWrt VM Performance Report ==="
+echo
+
+# ---------------------------------------------------------------------------
+# 4.1 VM / CPU 基础信息 + Hyper-V 检测（多信号，不依赖单一命令）
+# ---------------------------------------------------------------------------
+echo "Virtualization:"
+hv_signals=""
+PLEN=0
+
+# 信号 1/2：DMI 厂商与产品名
+vendor="$(read_file /sys/class/dmi/id/sys_vendor)"
+product="$(read_file /sys/class/dmi/id/product_name)"
+if [ -n "$vendor" ] && [ "$vendor" != "n/a" ]; then
+    echo "  dmi vendor: $vendor"
+    case "$vendor" in
+        *icrosoft*|*yper-V*) PLEN=1;;
+    esac
+fi
+if [ -n "$product" ] && [ "$product" != "n/a" ]; then
+    echo "  dmi product: $product"
+    case "$product" in
+        *irtual*|*yper-V*) PLEN=1;;
+    esac
+fi
+
+# 信号 3：/proc/cpuinfo 中是否带 hypervisor 与 Hyper-V 供应商字段
+if grep -qi "hypervisor" /proc/cpuinfo 2>/dev/null; then
+    hv_signals="$hv_signals cpuinfo-hypervisor "
+fi
+if grep -qiE "Microsoft Hv|Hyper-V" /proc/cpuinfo 2>/dev/null; then
+    hv_signals="$hv_signals cpuinfo-hyperv "
+fi
+
+# 信号 4：dmesg（可读时）
+if command -v dmesg >/dev/null 2>&1 && dmesg 2>/dev/null | grep -qiE "Hyper-V|hv_vmbus"; then
+    hv_signals="$hv_signals dmesg-hyperv "
+fi
+
+# 信号 5：NIC 驱动是否为 hv_netvsc
+for d in /sys/class/net/*; do
+    [ -d "$d" ] || continue
+    name="${d##*/}"
+    case "$name" in lo|br-*|docker*|veth*|tun*|tap*|vnet*|virbr*) continue;; esac
+    drv="$(basename "$(readlink "$d/device/driver" 2>/dev/null)")"
+    [ "$drv" = "hv_netvsc" ] && hv_signals="$hv_signals netvsc "
+done
+
+hyperv_detected="no"
+if [ "$PLEN" = "1" ] || [ -n "$hv_signals" ]; then
+    hyperv_detected="yes"
+fi
+echo "  hypervisor: $(grep -m1 -oE 'hypervisor +: +[A-Za-z]+' /proc/cpuinfo 2>/dev/null | sed 's/.*hypervisor *: *//')"
+echo "  detected platform: DMI=$([ "$PLEN" = "1" ] && echo hyperv || echo unknown)"
+echo "  Hyper-V detected: $hyperv_detected${hv_signals:+ (signals:$hv_signals)}"
+echo
+
+echo "CPU:"
+vcpus=0
+for c in /sys/devices/system/cpu/cpu[0-9]*; do
+    [ -d "$c" ] && vcpus=$((vcpus + 1))
+done
+[ "$vcpus" -eq 0 ] && vcpus="$(nproc 2>/dev/null || echo unknown)"
+echo "  vCPU count: $vcpus"
+echo "  architecture: $(uname -m 2>/dev/null || echo unknown)"
+echo
+
+# ---------------------------------------------------------------------------
+# 枚举真实 Ethernet NIC（跳过虚拟/容器接口）
+# ---------------------------------------------------------------------------
+NICS=""
+for d in /sys/class/net/*; do
+    [ -d "$d" ] || continue
+    name="${d##*/}"
+    case "$name" in
+        lo|br-*|docker*|veth*|tun*|tap*|vnet*|virbr*)
+            continue ;;
+    esac
+    # 优先保留带真实 device/driver 的接口
+    [ -d "$d/device" ] && NICS="$NICS $name"
+done
+# 如果靠 device 目录一个都没找到，退化为全部非虚拟接口
+if [ -z "$NICS" ]; then
+    for d in /sys/class/net/*; do
+        [ -d "$d" ] || continue
+        name="${d##*/}"
+        case "$name" in
+            lo|br-*|docker*|veth*|tun*|tap*|vnet*|virbr*) continue;;
+        esac
+        NICS="$NICS $name"
+    done
+fi
+
+if [ -z "$NICS" ]; then
+    echo "No physical Ethernet NIC found."
+    echo
+fi
+
+# ---------------------------------------------------------------------------
+# NIC 级观察循环
+# ---------------------------------------------------------------------------
+for iface in $NICS; do
+    echo "=== NIC: $iface ==="
+    echo "  MAC: $(read_file "/sys/class/net/$iface/address" n/a)"
+    link="$(read_file "/sys/class/net/$iface/operstate" n/a)"
+    echo "  link state: $link"
+
+    # driver：优先 ethtool -i，失败退回 sysfs
+    drv="n/a"
+    if [ "$HAS_ETHTOOL" = "1" ]; then
+        drv="$(ethtool -i "$iface" 2>/dev/null | awk -F: '/^driver:/ {gsub(/^ +| +$/,"",$2); print $2; exit}')"
+    fi
+    [ -z "$drv" ] && drv="n/a"
+    if [ "$drv" = "n/a" ]; then
+        drv="$(basename "$(readlink "/sys/class/net/$iface/device/driver" 2>/dev/null)")"
+    fi
+    echo "  driver: ${drv:-unknown}"
+
+    if [ "$HAS_ETHTOOL" = "1" ]; then
+        speed="$(ethtool "$iface" 2>/dev/null | awk -F: '/^[[:space:]]*Speed:/ {gsub(/^ +| +$/,"",$2); print $2; exit}')"
+        [ -n "$speed" ] && echo "  speed: $speed"
+    fi
+
+    # --- 4.3 queue 与 RSS ---
+    rx_q="$(ls -d "/sys/class/net/$iface/queues/"rx-* 2>/dev/null | wc -l | tr -d ' ')"
+    tx_q="$(ls -d "/sys/class/net/$iface/queues/"tx-* 2>/dev/null | wc -l | tr -d ' ')"
+    echo "  RX queue count: ${rx_q:-0} (sysfs)"
+    echo "  TX queue count: ${tx_q:-0} (sysfs)"
+    if [ "$HAS_ETHTOOL" = "1" ] && ethtool -l "$iface" >/dev/null 2>&1; then
+        echo "  ethtool -l (combined):"
+        ethtool -l "$iface" 2>/dev/null | sed 's/^/    /'
+    else
+        echo "  ethtool -l: unsupported"
+    fi
+    if [ "$HAS_ETHTOOL" = "1" ] && ethtool -x "$iface" >/dev/null 2>&1; then
+        echo "  ethtool -x (RSS indirection):"
+        ethtool -x "$iface" 2>/dev/null | sed 's/^/    /'
+    else
+        echo "  ethtool -x: unsupported"
+    fi
+    if [ "${rx_q:-0}" -gt 1 ]; then
+        echo "  [OK] multiple RX queues detected"
+    else
+        echo "  [INFO] single RX queue detected"
+    fi
+
+    # --- 4.4 offload 状态（只报告，不强制修改）---
+    if [ "$HAS_ETHTOOL" = "1" ] && ethtool -k "$iface" >/dev/null 2>&1; then
+        echo "  offload (ethtool -k):"
+        ethtool -k "$iface" 2>/dev/null | grep -E \
+            "rx-checksumming|tx-checksumming|scatter-gather|tcp-segmentation-offload|generic-segmentation-offload|generic-receive-offload|large-receive-offload" \
+            | sed 's/^/    /'
+    else
+        echo "  offload: unsupported (ethtool missing or driver)"
+    fi
+
+    # --- 4.6 RPS / XPS 只观察 ---
+    echo "  RPS masks (rx-*/rps_cpus):"
+    rps_found=0
+    for q in "/sys/class/net/$iface/queues/"rx-*; do
+        [ -r "$q/rps_cpus" ] || continue
+        rps_found=1
+        echo "    $(basename "$q"): $(read_file "$q/rps_cpus" 0)"
+    done
+    [ "$rps_found" = "0" ] && echo "    none"
+    echo "  XPS masks (tx-*/xps_cpus):"
+    xps_found=0
+    for q in "/sys/class/net/$iface/queues/"tx-*; do
+        [ -r "$q/xps_cpus" ] || continue
+        xps_found=1
+        echo "    $(basename "$q"): $(read_file "$q/xps_cpus" 0)"
+    done
+    [ "$xps_found" = "0" ] && echo "    none"
+
+    # --- 4.8 ring / coalescing 只观察 ---
+    if [ "$HAS_ETHTOOL" = "1" ] && ethtool -g "$iface" >/dev/null 2>&1; then
+        echo "  ring (ethtool -g):"
+        ethtool -g "$iface" 2>/dev/null | sed 's/^/    /'
+    else
+        echo "  ring: unsupported"
+    fi
+    if [ "$HAS_ETHTOOL" = "1" ] && ethtool -c "$iface" >/dev/null 2>&1; then
+        echo "  coalescing (ethtool -c):"
+        ethtool -c "$iface" 2>/dev/null | sed 's/^/    /'
+    else
+        echo  "  coalescing: unsupported"
+    fi
+    echo
+done
+
+# ---------------------------------------------------------------------------
+# 4.5 IRQ / softirq 分布（只提取网络相关，不整份 dump）
+# ---------------------------------------------------------------------------
+echo "=== IRQ / softirq ==="
+if [ -r /proc/interrupts ]; then
+    echo "-- /proc/interrupts (network-related) --"
+    grep -iE "hv_netvsc|vmbus|Hyper-V|virtio" /proc/interrupts 2>/dev/null | sed 's/^/  /'
+    # 尝试定位网络相关 IRQ 的 CPU 分布
+    net_irqs="$(grep -iE "hv_netvsc|vmbus|virtio" /proc/interrupts 2>/dev/null | awk '{n=NF; for(i=0;i<n-1;i++) s[i]+=$i} END {for(i=0;i<n-1;i++) printf "%d ",s[i]}')"
+    if [ -n "$net_irqs" ]; then
+        # 统计非零 CPU 列数
+        nonzero=0
+        for c in $net_irqs; do [ "$c" -gt 0 ] && nonzero=$((nonzero + 1)); done
+        if [ "$nonzero" -gt 1 ]; then
+            echo "  [OK] network work is visible on multiple CPUs"
+        else
+            echo "  [WARN] network IRQ work appears heavily concentrated on one CPU"
+        fi
+    else
+        echo "  [INFO] unable to determine IRQ balance automatically"
+    fi
+else
+    echo "  /proc/interrupts: n/a"
+fi
+
+if [ -r /proc/softirqs ]; then
+    echo "-- /proc/softirqs (NET_RX / NET_TX distribution) --"
+    grep -E "^ *(NET_RX|NET_TX)" /proc/softirqs 2>/dev/null | sed 's/^/  /'
+else
+    echo "  /proc/softirqs: n/a"
+fi
+echo
+
+# ---------------------------------------------------------------------------
+# 4.7 Softnet congestion
+# ---------------------------------------------------------------------------
+echo "=== Softnet (netdev) congestion ==="
+if [ -r /proc/net/softnet_stat ]; then
+    echo "  (raw rows: [cpu] processed dropped time_squeeze ...)"
+    # BusyBox 下十六进制转换可能受限：优先显示 raw 并说明，保证正确优先。
+    awk '{ printf "  cpu %d processed=0x%s dropped=0x%s time_squeeze=0x%s\n", NR-1, $1, $2, $3 }' /proc/net/softnet_stat 2>/dev/null | head -n 8
+    # 尝试用 printf 做 hex->dec 汇总（若 BusyBox 支持 %d 解析）
+    # 用 awk 的 strtonum 不可靠，故这里仅做 text 汇总，observer 自行判断。
+    dropped_total="$(awk '{s+=$2} END{if(s) printf "%d", s}' /proc/net/softnet_stat 2>/dev/null)"
+    if [ -n "$dropped_total" ] && [ "$dropped_total" != "0" ]; then
+        # 若累积为 0 则不提示
+        :
+    fi
+    # 保守判断：若第 2 列（dropped）全为 0，则无 softnet drop
+    if awk '{ if ($2 != "0" && $2 != "0x0") { f=1 } } END { exit f }' /proc/net/softnet_stat 2>/dev/null; then
+        echo "  [OK] no softnet drops observed"
+    else
+        echo "  [WARN] softnet drops observed; backlog/RSS/CPU distribution deserves testing"
+    fi
+else
+    echo "  /proc/net/softnet_stat: n/a"
+fi
+echo
+
+# ---------------------------------------------------------------------------
+# 4.9 当前 forwarding fast path 状态
+# ---------------------------------------------------------------------------
+echo "=== Forwarding fast path ==="
+flow="$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)"
+flow_hw="$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)"
+sfe="$(uci -q get firewall.@defaults[0].shortcut_fe 2>/dev/null)"
+sfe_mod="$(uci -q get firewall.@defaults[0].shortcut_fe_module 2>/dev/null)"
+mode="Baseline / None"
+if [ "$sfe" = "1" ]; then
+    mode="Shortcut-FE (module: ${sfe_mod:-unknown})"
+elif [ "$flow" = "1" ]; then
+    if [ "$flow_hw" = "1" ]; then
+        mode="Hardware Flow Offload"
+    else
+        mode="Software Flow Offload"
+    fi
+fi
+echo "  current mode: $mode"
+echo "  firewall.@defaults[0].flow_offloading=$flow"
+echo "  firewall.@defaults[0].flow_offloading_hw=$flow_hw"
+echo "  firewall.@defaults[0].shortcut_fe=$sfe"
+echo "  firewall.@defaults[0].shortcut_fe_module=$sfe_mod"
+echo
+
+# ---------------------------------------------------------------------------
+# 4.10 Conntrack 仅信息展示
+# ---------------------------------------------------------------------------
+echo "=== Conntrack (info only) ==="
+if [ -r /proc/sys/net/netfilter/nf_conntrack_count ] && [ -r /proc/sys/net/netfilter/nf_conntrack_max ]; then
+    echo "  nf_conntrack_count: $(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)"
+    echo "  nf_conntrack_max: $(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)"
+    echo "  [INFO] conntrack sizing is a capacity/reliability concern, not a direct packet-speed optimization."
+else
+    echo "  nf_conntrack: not exposed"
+fi
+echo
+
+echo "=== End of report (read-only; nothing was modified) ==="
+exit 0

@@ -1,0 +1,46 @@
+#!/bin/sh
+# =============================================================================
+# SELF/X86 覆盖版：NIC ring / coalescing 处理（默认只读，opt-in 才修改）
+#
+# 说明：
+#   - 本文件位于 SELF/X86/common/files，覆盖 PATCH/files 同名脚本（仅 X86 生效，
+#     Rockchip 行为不受影响）。
+#   - 历史脚本会在 interface add 时无条件把 RX/TX ring 拉到最大并强开 adaptive
+#     coalescing。这并非被证据支持的通用最佳值，可能增加 queueing / memory /
+#     latency。
+#   - 因此 X86 默认不再自动修改任何 ring/coalescing。是否优化由用户显式开启：
+#       /etc/config/swrt-vm-performance
+#         option auto_tune_ring '1'
+#     只有 auto_tune_ring=1 时才执行最大化 ring + adaptive coalescing。
+#   - 诊断请使用只读工具 swrt-vm-perf 观察队列 / RSS / offload / softnet。
+# =============================================================================
+
+[ "$ACTION" = "add" ] || exit 0
+[ -z "$DEVICENAME" ] && exit 0
+
+command -v ethtool >/dev/null 2>&1 || exit 0
+
+# opt-in 开关：默认关闭，绝不静默修改
+AUTO_TUNE_RING="$(uci -q get swrt-vm-performance.@global[0].auto_tune_ring 2>/dev/null)"
+[ "$AUTO_TUNE_RING" = "1" ] || exit 0
+
+NIC="$DEVICENAME"
+
+[ ! -d "/sys/class/net/$NIC/device" ] && exit 0
+[ "$(cat "/sys/class/net/$NIC/type" 2>/dev/null)" != "1" ] && exit 0
+
+ETHTOOL_G=$(ethtool -g "$NIC" 2>/dev/null)
+[ -z "$ETHTOOL_G" ] && exit 0
+
+RX_MAX=$(echo "$ETHTOOL_G" | awk '/RX:/ {print $2; exit}')
+TX_MAX=$(echo "$ETHTOOL_G" | awk '/TX:/ {print $2; exit}')
+
+[ -n "$RX_MAX" ] && [ "$RX_MAX" != "0" ] && ethtool -G "$NIC" rx "$RX_MAX" 2>/dev/null
+[ -n "$TX_MAX" ] && [ "$TX_MAX" != "0" ] && ethtool -G "$NIC" tx "$TX_MAX" 2>/dev/null
+
+if ethtool -c "$NIC" 2>/dev/null | grep -q "Adaptive RX:"; then
+    ethtool -C "$NIC" adaptive-rx on adaptive-tx on >/dev/null 2>&1
+fi
+
+logger -t net-buffer "Opt-in: maximized ring buffers for $NIC (auto_tune_ring=1)"
+exit 0

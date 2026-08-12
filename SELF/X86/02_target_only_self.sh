@@ -90,11 +90,14 @@ if [ -d ./files/files ]; then
 fi
 
 CHECK_FILES="./files/etc/uci-defaults/99-x86-vm-network"
+# SELF/X86/common/files 中预期进入 firmware 的关键文件
+CHECK_FILES="$CHECK_FILES ./files/usr/bin/swrt-vm-perf"
 # PATCH/files 中预期进入 firmware 的关键文件
 if [ -f ../PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd ]; then
     CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/99-yunshu-disable-ipv6-pd"
 fi
-if [ -f ../PATCH/files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers ]; then
+# X86 覆盖版 hotplug（SELF 覆盖 PATCH，默认只读，opt-in 才修改）
+if [ -f ../SELF/X86/common/files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers ]; then
     CHECK_FILES="$CHECK_FILES ./files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers"
 fi
 

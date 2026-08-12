@@ -352,7 +352,9 @@ jobs:
         if: inputs.build_firmware && matrix.name == 'X86'
         working-directory: ${{ github.workspace }}
         run: |
-          SELF/X86/tests/vm-smoke-test.sh
+          # 显式用 Bash 执行：脚本依赖 mapfile 与 set -euo pipefail，
+          # 且不依赖 Git 中脚本的 executable bit，避免 mode 意外变化导致 exit 126。
+          /bin/bash SELF/X86/tests/vm-smoke-test.sh
 
       - name: Organize files
         if: inputs.build_firmware

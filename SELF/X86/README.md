@@ -16,10 +16,11 @@ SELF/X86/
 ├── config_self.seed          # x86/64 目标配置种子
 ├── 02_target_only_self.sh    # x86 目标专用构建步骤
 ├── common/files/             # 所有 x86 VM 通用文件（如网络首次初始化）
-├── hyperv/                   # Hyper-V 专用（预留，VHDX 等）
+│   └── usr/bin/swrt-vm-perf  # 只读 VM 网络性能诊断工具（Hyper-V/KVM）
+├── hyperv/                   # Hyper-V 专用（VMMQ/vRSS 说明，见 hyperv/README.md）
 ├── kvm/                      # KVM/PVE 基础适配（预留，raw/qcow2）
 └── tests/
-    └── vm-smoke-test.sh      # QEMU 启动 smoke test
+    └── vm-smoke-test.sh      # QEMU 启动 smoke test（EFI→init complete + ≥2 NIC）
 ```
 
 > 分层是方向，不强求搬移所有旧文件。当前以最小改动为主，`hyperv/`、`kvm/`
@@ -59,6 +60,23 @@ SELF/X86/
 | LRNG  | 保留（可选增强） | 视为 optional enhancement，非 x86 VM 核心优化 |
 | nftables flow offload | 保留 | 由 firewall4/LuCI 控制 |
 | x86-64-v2/v3 | 默认关闭 | 保持 generic，保证跨宿主机迁移 |
+| swrt-vm-perf | 只读诊断 | `usr/bin/swrt-vm-perf`，观察 RSS/queue/offload/IRQ/softnet，绝不自动修改 |
+| ring/coalescing 自动加固 | opt-in | X86 默认不再最大化 ring；由 `/etc/config/swrt-vm-performance` 的 `auto_tune_ring=1` 显式开启 |
+
+## VM 网络性能定位
+
+- **默认只读**：`swrt-vm-perf` 只观测并报告，不修改任何参数。它枚举真实 Ethernet NIC，
+  输出 Hyper-V/KVM 检测、queue/RSS、offload、IRQ/softirq 分布、RPS/XPS mask、
+  softnet 拥塞、ring/coalescing、当前 forwarding fast path 与 conntrack 信息。
+- **不默认开启**：RPS、irqbalance、超大 backlog、64MB socket buffer、conntrack 大数
+  均为条件性建议，只有在 `swrt-vm-perf` 检测到真实瓶颈（例如单 CPU NET_RX 饱和、
+  softnet drops）且宿主侧 VMMQ/vRSS 已排查后才考虑 A/B。
+- **Hyper-V 优先处理宿主侧**：Host NIC RSS → vSwitch VMMQ → VM vRSS → hv_netvsc
+  multi-queue → OpenWrt。不要在 guest 内用 RPS 掩盖宿主 RSS/VMMQ 未配置。
+  具体检查命令见 [hyperv/README.md](hyperv/README.md)。
+- **fast path 互斥**：Baseline / Software Flow Offload / Hardware Flow Offload /
+  Shortcut-FE 由 LuCI 互斥选择，不强制叠加。性能对比建议按
+  `None → Software Flow Offload → Shortcut-FE` 逐一实测，不以理论宣称快慢。
 
 ## Source Lock
 

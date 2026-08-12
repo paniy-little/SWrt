@@ -61,14 +61,23 @@ timeout "${BOOT_TIMEOUT:-150}s" qemu-system-x86_64 \
   -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
   -nographic -serial stdio -no-reboot \
   > "$LOG" 2>&1
+QEMU_EXIT=$?
 set -e
 
+# 可审计性：始终打印 QEMU 真实 exit code、init 状态、NIC、命中的 fatal marker。
+# 仅用于定位，不因此放宽任何门禁判定。
+mapfile -t nics < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
+FATAL_MARKER="$(grep -oE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG" | head -n1 || true)"
+echo "[smoke] qemu exit=${QEMU_EXIT}"
+echo "[smoke] init complete=$([ "$(grep -c 'init complete' "$LOG" 2>/dev/null || echo 0)" -gt 0 ] && echo yes || echo no)"
+echo "[smoke] NICs=${nics[*]:-none}"
+echo "[smoke] fatal marker=${FATAL_MARKER:-none}"
 echo "[smoke] ---- boot log tail ----"
 tail -n 40 "$LOG"
 
 # 失败标记：任一命中即判失败
-if grep -qE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG"; then
-  echo "::error::VM boot hit a fatal error marker"
+if [ -n "$FATAL_MARKER" ]; then
+  echo "::error::VM boot hit a fatal error marker: $FATAL_MARKER"
   exit 1
 fi
 
@@ -77,7 +86,6 @@ if grep -q "init complete" "$LOG"; then
   echo "[smoke] PASS: OpenWrt 'init complete' reached"
   # 双 NIC 门禁：从 boot log 提取唯一接口名，至少识别 2 块。
   # 仅匹配完整 ethN 接口名，避免把 enabled/entropy 等普通单词误判为接口。
-  mapfile -t nics < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
   nic_count="${#nics[@]}"
   echo "[smoke] unique NIC interface names seen: $nic_count (${nics[*]:-none})"
   if [ "$nic_count" -lt 2 ]; then
@@ -87,5 +95,5 @@ if grep -q "init complete" "$LOG"; then
   exit 0
 fi
 
-echo "::error::VM boot did not reach 'init complete' within timeout"
+echo "::error::VM boot did not reach 'init complete' within timeout (qemu exit=${QEMU_EXIT})"
 exit 1
