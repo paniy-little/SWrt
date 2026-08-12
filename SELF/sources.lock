@@ -1,0 +1,39 @@
+# =============================================================================
+# SWrt SELF 构建源锁定（Source Lock）
+#
+# 目的：提高可复现性。对影响最终 firmware 的关键外部源记录引用。
+#
+# 两种模式：
+#   - normal / nightly：自动发现新版本（分支/最新 tag），构建验证。
+#   - release：使用下方已通过测试的 commit/ref lock，保证可复现。
+#
+# 原则：自动更新负责“发现新版本”，Release lock 负责“可复现”。
+# 维护者或 CI 在 release 前更新本文件中的 *_REF 为具体 commit SHA。
+#
+# 说明：本文件当前记录的是默认分支引用（advisory）。在正式 release 工作流中，
+# 请将 *_REF 替换为经过验证的具体 commit SHA 后再构建。
+# =============================================================================
+
+# OpenWrt 主分支：当前使用最新 release tag（动态），release 构建前应固定为具体 tag/commit
+OPENWRT_REF=v25.12.0
+
+# OpenWrt 25.12 snapshot 分支（用于复用较新的 package/base-files 等）
+OPENWRT_25_REF=openwrt-25.12
+
+# OpenWrt main（用于 firewall4 等较新组件）
+OPENWRT_MAIN_REF=main
+
+# packages feed
+PACKAGES_REF=master
+
+# LEDE（coolwswolf）用于部分 kernel patch 与包
+LEDE_REF=master
+
+# OpenWrt-Add（QiuSimons）
+OPENWRT_ADD_REF=master
+
+# 辅助仓库（luci-app-dockerman / luci-lib-docker / luci-app-diskman / upnp-nat-relay）
+DOCKERMAN_REF=master
+DOCKER_LIB_REF=master
+DISKMAN_REF=master
+UPNP_NAT_RELAY_REF=main
