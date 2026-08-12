@@ -34,7 +34,7 @@ sed -i 's/;)\s*\\/; \\/' include/feeds.mk
 # Nginx
 sed -i "s/large_client_header_buffers 2 1k/large_client_header_buffers 4 32k/g" feeds/packages/net/nginx-util/files/uci.conf.template
 sed -i "s/client_max_body_size 128M/client_max_body_size 2048M/g" feeds/packages/net/nginx-util/files/uci.conf.template
-sed -i '/client_max_body_size/a\\tclient_body_buffer_size 8192M;' feeds/packages/net/nginx-util/files/uci.conf.template
+sed -i '/client_max_body_size/a\\tclient_body_buffer_size 256k;' feeds/packages/net/nginx-util/files/uci.conf.template
 sed -i '/client_max_body_size/a\\tserver_names_hash_bucket_size 128;' feeds/packages/net/nginx-util/files/uci.conf.template
 sed -i '/ubus_parallel_req/a\        ubus_script_timeout 600;' feeds/packages/net/nginx/files-luci-support/60_nginx-luci-support
 sed -ri "/luci-webui.socket/i\ \t\tuwsgi_send_timeout 600\;\n\t\tuwsgi_connect_timeout 600\;\n\t\tuwsgi_read_timeout 600\;" feeds/packages/net/nginx/files-luci-support/luci.locations
@@ -148,11 +148,9 @@ cp -rf ../lede/target/linux/x86/patches-${KERNEL_VERSION}/996-intel-igc-i225-i22
 cp -rf ../PATCH/kernel/btf/* ./target/linux/generic/hack-${KERNEL_VERSION}/
 
 ### 获取额外的基础软件包 ###
-# Disable Mitigations
-sed -i 's,rootwait,rootwait mitigations=off,g' target/linux/rockchip/image/default.bootscript
-sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-efi.cfg
-sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-iso.cfg
-sed -i 's,@CMDLINE@ noinitrd,noinitrd mitigations=off,g' target/linux/x86/image/grub-pc.cfg
+# 安全默认：生产构建不再注入 mitigations=off，x86 与 rockchip 均保持内核默认
+# （mitigations 开启）。若确需极限 benchmark，请使用显式、独立、默认关闭的
+# performance flavor（本轮未提供）。
 
 ### ADD PKG 部分 ###
 cp -rf ../OpenWrt-Add ./package/new
@@ -304,8 +302,8 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 # rm -rf ./package/new/openwrt_helloworld
 # grep -rl --null "luci-app-passwall" . | xargs -0 dirname | sort -u
 # echo "上面是内容"
-# eth0和eth1对调
-sed -i 's/eth0/__TEMP__/g; s/eth1/eth0/g; s/__TEMP__/eth1/g' package/base-files/etc/config/network
+# 网络初始化（eth0/eth1 顺序）已由 SELF/X86 的首次启动 uci-defaults 安全处理，
+# 不再对 base-files 默认配置做全局硬编码改名，避免覆盖用户已有配置。
 #修复fail2ban
 #修复fail2ban
 sed -i '/PKG_CPE_ID:=cpe:\/a:fail2ban:fail2ban/a PKG_BUILD_DEPENDS:=python-setuptools/host' feeds/packages/net/fail2ban/Makefile
