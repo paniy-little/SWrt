@@ -1,0 +1,97 @@
+#!/bin/sh
+# =============================================================================
+# SELF/X86 首次启动网络初始化
+#
+# 设计原则：
+#   - uci-defaults 脚本只在系统首次配置时运行一次，运行后自删除，
+#     因此「升级固件 / 每次开机」都不会重复写入 /etc/config/network，
+#     用户已有网络配置不会被覆盖。
+#   - 若 /etc/config/network 中已存在可用的 lan/wan（含用户配置），直接跳过。
+#   - 支持通过 /etc/network.env 指定 WAN_MAC / LAN_MAC 做稳定 MAC 映射，
+#     适用于 Hyper-V / KVM 中网卡枚举顺序不稳定的场景。
+#   - 未指定 MAC 时，回退到「第一块物理网卡 = WAN，第二块 = LAN」，
+#     仅对全新安装生效。
+# =============================================================================
+
+# 可选的环境变量：WAN_MAC / LAN_MAC（格式：xx:xx:xx:xx:xx:xx）
+# 由维护者在 /etc/network.env 中提供，SELF 不默认写入。
+if [ -f /etc/network.env ]; then
+    . /etc/network.env
+fi
+
+# 已存在用户配置：绝不覆盖
+lan_device="$(uci -q get network.lan.device)"
+wan_device="$(uci -q get network.wan.device)"
+if [ -n "$lan_device" ] || [ -n "$wan_device" ]; then
+    exit 0
+fi
+
+# 收集物理以太网接口（按枚举顺序），跳过虚拟接口
+ifaces=""
+for d in /sys/class/net/*; do
+    [ -d "$d" ] || continue
+    name="${d##*/}"
+    case "$name" in
+        lo | br-* | docker0 | veth* | tun* | tap* | vnet* | virbr*)
+            continue
+            ;;
+    esac
+    ifaces="$ifaces $name"
+done
+
+# 根据 MAC 解析接口名
+mac_to_iface() {
+    mac="$1"
+    for d in /sys/class/net/*; do
+        [ -f "$d/address" ] || continue
+        name="${d##*/}"
+        addr="$(cat "$d/address" 2>/dev/null)"
+        [ "$addr" = "$mac" ] && { echo "$name"; return 0; }
+    done
+    return 1
+}
+
+wan=""
+lan=""
+[ -n "${WAN_MAC:-}" ] && wan="$(mac_to_iface "$WAN_MAC")"
+[ -n "${LAN_MAC:-}" ] && lan="$(mac_to_iface "$LAN_MAC")"
+
+# 回退：第一块网卡 WAN，第二块网卡 LAN
+first=""
+second=""
+for i in $ifaces; do
+    if [ -z "$first" ]; then
+        first="$i"
+    elif [ -z "$second" ]; then
+        second="$i"
+        break
+    fi
+done
+[ -n "$wan" ] || wan="$first"
+[ -n "$lan" ] || lan="$second"
+
+# 至少要有一块网卡才初始化
+[ -n "$lan" ] || exit 0
+
+# 设置 LAN（config_generate 已创建默认 lan，这里只校正设备）
+uci -q batch <<EOF
+set network.lan.device="$lan"
+EOF
+
+# WAN：若不存在则创建（proto dhcp）
+if [ -n "$wan" ]; then
+    if ! uci -q get network.wan >/dev/null 2>&1; then
+        uci -q batch <<EOF
+set network.wan=interface
+set network.wan.proto='dhcp'
+set network.wan.device="$wan"
+EOF
+    else
+        uci -q batch <<EOF
+set network.wan.device="$wan"
+EOF
+    fi
+fi
+
+uci -q commit network
+exit 0
