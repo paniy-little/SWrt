@@ -15,6 +15,24 @@ set -u
 
 echo "[SELF][X86] Applying common VM config"
 
+# ---------------------------------------------------------------------------
+# x86 内核版本校验：直接读取 x86 自身的 KERNEL_PATCHVER，不依赖 rockchip。
+# 与公共 SELF 中 rockchip 的检查解耦，X86 不再因 rockchip Makefile 而失败。
+# ---------------------------------------------------------------------------
+EXPECTED_KERNEL="${KERNEL_VERSION:-6.12}"
+current_version="$(
+    sed -n 's/^KERNEL_PATCHVER:=//p' ./target/linux/x86/Makefile
+)"
+if [ -z "$current_version" ]; then
+    echo "ERROR: cannot determine x86 KERNEL_PATCHVER" >&2
+    exit 1
+fi
+if [ "$current_version" != "$EXPECTED_KERNEL" ]; then
+    echo "ERROR: x86 kernel mismatch: expected $EXPECTED_KERNEL, got $current_version" >&2
+    exit 1
+fi
+echo "[SELF][X86] x86 kernel OK: $current_version"
+
 # libsodium：保持与上游 feeds 一致的编译选项
 sed -i 's,no-mips16 no-lto,no-mips16,g' feeds/packages/libs/libsodium/Makefile
 
@@ -37,6 +55,16 @@ exit 0
 EOF
 
 # ---------------------------------------------------------------------------
+# files overlay 合并：
+#   顺序为 PATCH/files 先，SELF/X86/common/files 后（后者优先级最高）。
+#   使用 cp -a <src>/. <dst>/ 合并内容，避免目标目录已存在时产生
+#   ./files/files/... 的嵌套层级。
+# ---------------------------------------------------------------------------
+echo "[SELF][X86] Merging files overlay (PATCH then SELF)"
+mkdir -p ./files
+cp -a ../PATCH/files/. ./files/
+cp -a ../SELF/X86/common/files/. ./files/
+
 # 网络初始化：由 SELF/X86/common/files/etc/uci-defaults/99-x86-vm-network
 # 提供的 uci-defaults 脚本负责。uci-defaults 只会在该系统首次配置时执行并
 # 自删除，因此：
@@ -45,17 +73,38 @@ EOF
 #   - 未指定 MAC 时回退到“第一块网卡 WAN、第二块网卡 LAN”，仅对全新安装生效。
 # ---------------------------------------------------------------------------
 echo "[SELF][X86] Installing VM network first-boot init"
-mkdir -p ./files/etc/uci-defaults
-cp -f ../SELF/X86/common/files/etc/uci-defaults/99-x86-vm-network \
-      ./files/etc/uci-defaults/99-x86-vm-network
-chmod +x ./files/etc/uci-defaults/99-x86-vm-network
+chmod +x ./files/etc/uci-defaults/99-x86-vm-network 2>/dev/null || true
 
 # 预配置一些插件文件（仅首次安装生效的默认文件）
 echo "[SELF][X86] Copying plugin default files"
-cp -rf ../PATCH/files ./files
 
 find ./ -name *.orig | xargs rm -f
 find ./ -name *.rej | xargs rm -f
+
+# ---------------------------------------------------------------------------
+# overlay 结果校验：确保合并层级正确，且关键文件存在。
+# ---------------------------------------------------------------------------
+if [ -d ./files/files ]; then
+    echo "ERROR: nested ./files/files overlay detected" >&2
+    exit 1
+fi
+
+CHECK_FILES="./files/etc/uci-defaults/99-x86-vm-network"
+# PATCH/files 中预期进入 firmware 的关键文件
+if [ -f ../PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd ]; then
+    CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/99-yunshu-disable-ipv6-pd"
+fi
+if [ -f ../PATCH/files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers ]; then
+    CHECK_FILES="$CHECK_FILES ./files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers"
+fi
+
+for f in $CHECK_FILES; do
+    if [ ! -f "$f" ]; then
+        echo "ERROR: overlay missing expected file: $f" >&2
+        exit 1
+    fi
+done
+echo "[SELF][X86] overlay OK: $(echo $CHECK_FILES | wc -w | tr -d ' ') files present"
 
 echo "[SELF][X86] Done"
 exit 0

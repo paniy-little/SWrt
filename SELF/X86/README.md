@@ -44,7 +44,10 @@ SELF/X86/
 - 由 `common/files/etc/uci-defaults/99-x86-vm-network` 在**首次启动**执行（uci-defaults
   运行后自删除，不会每次开机重复写入）。
 - **不覆盖已有用户配置**：若 `/etc/config/network` 已存在可用的 lan/wan 则跳过。
-- 支持通过 `/etc/network.env` 指定 `WAN_MAC` / `LAN_MAC` 做稳定 MAC 映射。
+- 支持通过 `/etc/network.env` 指定 `WAN_MAC` / `LAN_MAC` 做稳定 MAC 映射
+  （示例见 `SELF/X86/network.env.example`，不随 firmware 分发）。
+- MAC 比较统一转小写；`WAN_MAC`/`LAN_MAC` 不能解析为同一接口。
+- 显式指定 MAC 但找不到时，不静默回退到其它接口。
 - 未指定时回退到“第一块物理网卡 = WAN、第二块 = LAN”，仅对全新安装生效。
 
 ## 性能功能定位
@@ -66,4 +69,9 @@ commit/ref lock 以保证可复现。
 
 - `bash -n`：静态检查 SELF 脚本语法。
 - `make defconfig`：验证 `config_self.seed` 可正常展开。
-- QEMU smoke test：`SELF/X86/tests/vm-smoke-test.sh`，验证 EFI 启动 → init complete。
+- QEMU smoke test：`SELF/X86/tests/vm-smoke-test.sh`，验证 EFI 启动 → init complete，
+  并强制要求 boot log 中识别到至少 2 块网卡。
+- overlay 校验：`02_target_only_self.sh` 合并 `PATCH/files` + `SELF/X86/common/files`
+  后，确认最终层级为 `files/etc/...`（非 `files/files/...`），且关键文件存在。
+- x86 kernel 校验：`02_target_only_self.sh` 直接读取 `target/linux/x86/Makefile` 的
+  `KERNEL_PATCHVER`，不再依赖 rockchip target。

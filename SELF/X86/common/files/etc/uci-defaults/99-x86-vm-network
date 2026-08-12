@@ -39,13 +39,14 @@ for d in /sys/class/net/*; do
     ifaces="$ifaces $name"
 done
 
-# 根据 MAC 解析接口名
+# 根据 MAC 解析接口名（MAC 比较统一转小写）
 mac_to_iface() {
-    mac="$1"
+    mac="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
     for d in /sys/class/net/*; do
         [ -f "$d/address" ] || continue
         name="${d##*/}"
         addr="$(cat "$d/address" 2>/dev/null)"
+        addr="$(printf '%s' "$addr" | tr 'A-Z' 'a-z')"
         [ "$addr" = "$mac" ] && { echo "$name"; return 0; }
     done
     return 1
@@ -53,10 +54,21 @@ mac_to_iface() {
 
 wan=""
 lan=""
-[ -n "${WAN_MAC:-}" ] && wan="$(mac_to_iface "$WAN_MAC")"
-[ -n "${LAN_MAC:-}" ] && lan="$(mac_to_iface "$LAN_MAC")"
+# 用户显式指定 MAC：若解析不到，绝不静默回退到其它接口
+if [ -n "${WAN_MAC:-}" ]; then
+    wan="$(mac_to_iface "$WAN_MAC")"
+    if [ -z "$wan" ]; then
+        echo "WARNING: WAN_MAC '$WAN_MAC' not found among physical NICs; leaving WAN unset (no fallback)." >&2
+    fi
+fi
+if [ -n "${LAN_MAC:-}" ]; then
+    lan="$(mac_to_iface "$LAN_MAC")"
+    if [ -z "$lan" ]; then
+        echo "WARNING: LAN_MAC '$LAN_MAC' not found among physical NICs; leaving LAN unset (no fallback)." >&2
+    fi
+fi
 
-# 回退：第一块网卡 WAN，第二块网卡 LAN
+# 回退：仅在用户未显式指定时，才使用“第一块网卡 WAN、第二块网卡 LAN”
 first=""
 second=""
 for i in $ifaces; do
@@ -67,8 +79,14 @@ for i in $ifaces; do
         break
     fi
 done
-[ -n "$wan" ] || wan="$first"
-[ -n "$lan" ] || lan="$second"
+[ -n "${WAN_MAC:-}" ] || wan="${wan:-$first}"
+[ -n "${LAN_MAC:-}" ] || lan="${lan:-$second}"
+
+# WAN/LAN 不能解析或回退到同一接口，否则跳过自动初始化
+if [ -n "$wan" ] && [ -n "$lan" ] && [ "$wan" = "$lan" ]; then
+    echo "WARNING: WAN and LAN resolved to the same interface '$wan'; skipping auto-init." >&2
+    exit 0
+fi
 
 # 至少要有一块网卡才初始化
 [ -n "$lan" ] || exit 0

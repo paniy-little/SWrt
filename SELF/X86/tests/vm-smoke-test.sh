@@ -75,9 +75,14 @@ fi
 # 成功标记：OpenWrt 标准 init 完成
 if grep -q "init complete" "$LOG"; then
   echo "[smoke] PASS: OpenWrt 'init complete' reached"
-  # 尽力确认至少 2 块网卡被识别（不强制，避免误判）
-  nics="$(grep -cE "eth[0-9]+|en[A-Za-z0-9]+" "$LOG" || true)"
-  echo "[smoke] new interface lines seen: $nics"
+  # 双 NIC 门禁：从 boot log 提取唯一接口名，至少识别 2 块
+  mapfile -t nics < <(grep -oE 'eth[0-9]+|en[a-zA-Z0-9]+' "$LOG" | sort -u)
+  nic_count="${#nics[@]}"
+  echo "[smoke] unique NIC interface names seen: $nic_count (${nics[*]:-none})"
+  if [ "$nic_count" -lt 2 ]; then
+    echo "::error::Expected at least 2 NICs, only saw $nic_count"
+    exit 1
+  fi
   exit 0
 fi
 
