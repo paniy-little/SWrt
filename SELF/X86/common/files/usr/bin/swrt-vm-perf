@@ -318,12 +318,14 @@ $(awk 'function hex2dec(h,    i,c,v,n){
       END{ printf "%d %d %d\n", p, d, s }' /proc/net/softnet_stat 2>/dev/null)
 EOF
     echo "  processed total: ${soft_processed:-0}"
-    echo "  dropped total: ${soft_dropped:-0}"
-    echo "  time_squeeze total: ${soft_squeeze:-0}"
+    echo "  dropped cumulative total: ${soft_dropped:-0}"
+    echo "  time_squeeze cumulative total: ${soft_squeeze:-0}"
     if [ "${soft_dropped:-0}" = "0" ]; then
-        echo "  [OK] no softnet drops observed"
+        echo "  [OK] no cumulative softnet drops observed"
     else
-        echo "  [WARN] softnet drops observed: ${soft_dropped} (backlog/RSS/CPU distribution deserves testing)"
+        echo "  [INFO] cumulative softnet drops observed: ${soft_dropped}"
+        echo "  [INFO] current pressure cannot be inferred from one snapshot."
+        echo "  Run under-load delta testing before changing backlog."
     fi
 else
     echo "  /proc/net/softnet_stat: n/a"

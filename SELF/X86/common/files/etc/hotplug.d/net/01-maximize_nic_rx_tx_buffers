@@ -37,7 +37,7 @@ EOF
 
 # 解析失败：no-op + 日志，不修改
 if [ -z "$RX_MAX" ] || [ -z "$TX_MAX" ] || [ "$RX_MAX" = "0" ] || [ "$TX_MAX" = "0" ]; then
-    logger -t net-buffer "SWrt: cannot parse pre-set maximums for $NIC; no-op"
+    logger -t net-buffer "SWrt: cannot parse pre-set maximums for $NIC; safe no-op"
     exit 0
 fi
 
@@ -54,5 +54,28 @@ if [ -n "$TX_TARGET" ]; then
     ethtool -G "$NIC" tx "$TX_TARGET" >/dev/null 2>&1
 fi
 
-logger -t net-buffer "SWrt Hyper-V NIC tuning: $NIC hv_netvsc ring rx=${RX_TARGET:-keep} tx=${TX_TARGET:-keep}"
+# read-back：重新读取 Current hardware settings 的真实当前值，按实际结果记录，
+# 不能因为 ethtool -G 静默失败而写假成功日志。
+# 明确区分 Pre-set maximums 与 Current hardware settings，只读第二段。
+read -r RX_ACTUAL TX_ACTUAL <<EOF
+$(ethtool -g "$NIC" 2>/dev/null | awk '/Current hardware settings:/{in=1; next} in && /^RX:/{rx=$2} in && /^TX:/{tx=$2} END{print rx+0, tx+0}')
+EOF
+
+# 若连 read-back 都无法解析：安全 no-op，不阻塞启动
+if [ -z "$RX_ACTUAL" ] || [ -z "$TX_ACTUAL" ]; then
+    logger -t net-buffer "SWrt Hyper-V NIC tuning: $NIC cannot read back ring; safe no-op"
+    exit 0
+fi
+
+# 判定每方向是否达到目标（无目标时"keep"视为满足）
+RX_OK="${RX_ACTUAL}"
+[ -n "$RX_TARGET" ] && [ "$RX_ACTUAL" -lt "$RX_TARGET" ] && RX_OK=""
+TX_OK="${TX_ACTUAL}"
+[ -n "$TX_TARGET" ] && [ "$TX_ACTUAL" -lt "$TX_TARGET" ] && TX_OK=""
+
+if [ -n "$RX_OK" ] && [ -n "$TX_OK" ]; then
+    logger -t net-buffer "SWrt Hyper-V NIC tuning: $NIC requested rx ${RX_TARGET:-keep} tx ${TX_TARGET:-keep} actual rx=${RX_ACTUAL} tx=${TX_ACTUAL} [OK]"
+else
+    logger -t net-buffer "SWrt Hyper-V NIC tuning: $NIC requested rx ${RX_TARGET:-keep} tx ${TX_TARGET:-keep} actual rx=${RX_ACTUAL} tx=${TX_ACTUAL} [WARN]"
+fi
 exit 0

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# SELF/X86：首次启动启用 swrt-vm-performance 服务
+#
+# 背景：/etc/init.d/swrt-vm-performance 来自 rootfs overlay，而非 opkg package，
+# 仅有 START=99 不会自动生成 /etc/rc.d/S99swrt-vm-performance。
+# 此处通过 OpenWrt uci-defaults 机制在首次启动执行一次：
+#   - enable 创建 /etc/rc.d/S99swrt-vm-performance（开机自动执行 Packet Steering auto 决策）
+#   - start  让第一次启动本轮也立即应用 auto 决策
+# 执行成功后 uci-defaults 会自动移除本脚本，不影响后续升级与用户已有配置。
+
+if [ -x /etc/init.d/swrt-vm-performance ]; then
+    /etc/init.d/swrt-vm-performance enable
+    /etc/init.d/swrt-vm-performance start
+fi
+
+exit 0

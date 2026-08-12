@@ -47,3 +47,28 @@
 | <img width="60" src="https://avatars.githubusercontent.com/u/32666230" /> | <img width="60" src="https://avatars.githubusercontent.com/u/5166306" /> | <img width="60" src="https://avatars.githubusercontent.com/u/48883331" /> |
 |              [AmadeusGhost](https://github.com/AmadeusGhost)               |              [1715173329](https://github.com/1715173329)               |              [vernesong](https://github.com/vernesong)               |
 | <img width="60" src="https://avatars.githubusercontent.com/u/42570690" /> | <img width="60" src="https://avatars.githubusercontent.com/u/22235437" /> | <img width="60" src="https://avatars.githubusercontent.com/u/42875168" /> |
+
+---
+
+## SELF 工程维护约定
+
+`SELF/` 是自用覆盖层，与上游 `SCRIPTS/` 对应关系如下：
+
+| 上游（SCRIPTS/） | 自用（SELF/） |
+|---|---|
+| `01_get_ready.sh` | `01_get_ready_self.sh` |
+| `02_prepare_package.sh` | `02_prepare_package_self.sh` |
+| `R2S/02_target_only.sh` | `R2S/02_target_only_self.sh` |
+| `X86/02_target_only.sh` | `X86/02_target_only_self.sh` |
+| `SEED/R2S/config.seed` | `R2S/config_self.seed` |
+| `SEED/X86/config.seed` | `X86/config_self.seed` |
+
+维护铁律：
+
+1. **永不修改 `SCRIPTS/`**：上游每 3 小时自动同步覆盖，改动会丢失。
+2. **`SELF/` 中的注释是刻意的**：不要顺手取消注释。
+3. **`config_self.seed` 用注释而非删除**：删除会导致 `defconfig` 补回上游默认值。
+
+上游同步后，先看 `git log --oneline -5` 与 `git diff HEAD~1 --name-only`，核对 `SCRIPTS/`
+与 `SEED/` 的变更，再决定是否同步到 `SELF/` 对应文件。上游 bug 修复 / 功能改进应同步并保留
+自用定制；上游新增功能或与自用定制冲突时，先确认再处理。

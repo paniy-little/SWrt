@@ -75,6 +75,11 @@ cp -a ../SELF/X86/common/files/. ./files/
 echo "[SELF][X86] Installing VM network first-boot init"
 chmod +x ./files/etc/uci-defaults/99-x86-vm-network 2>/dev/null || true
 
+# swrt-vm-performance 首次启动自动启用（uci-defaults 脚本必须可执行）
+# 该脚本负责 enable + start 服务，生成 /etc/rc.d/S99swrt-vm-performance。
+echo "[SELF][X86] Installing swrt-vm-performance first-boot enable"
+chmod +x ./files/etc/uci-defaults/98-swrt-vm-performance 2>/dev/null || true
+
 # 预配置一些插件文件（仅首次安装生效的默认文件）
 echo "[SELF][X86] Copying plugin default files"
 
@@ -90,6 +95,8 @@ if [ -d ./files/files ]; then
 fi
 
 CHECK_FILES="./files/etc/uci-defaults/99-x86-vm-network"
+# swrt-vm-performance 首次启动自动启用脚本（uci-defaults）
+CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/98-swrt-vm-performance"
 # SELF/X86/common/files 中预期进入 firmware 的关键文件
 CHECK_FILES="$CHECK_FILES ./files/usr/bin/swrt-vm-perf"
 CHECK_FILES="$CHECK_FILES ./files/etc/config/swrt-vm-performance"
