@@ -24,20 +24,52 @@ if [ -z "$IMG" ] || [ ! -f "$IMG" ]; then
   exit 1
 fi
 
-# OVMF (EFI) 固件：x86 SELF 镜像为 EFI，必须提供
-OVMF=""
-for f in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
-  if [ -f "$f" ]; then OVMF="$f"; break; fi
-done
-if [ -z "$OVMF" ]; then
-  echo "ERROR: OVMF EFI firmware not found. Install package 'ovmf'."
+# OVMF (EFI) 固件：4M 固件由 CODE 与 VARS 两部分组成，必须作为 pflash 成对加载。
+# 不能把 OVMF_CODE_4M.fd 直接交给 -bios；它不是独立的传统 PC BIOS 镜像。
+OVMF_CODE="${OVMF_CODE:-}"
+OVMF_VARS="${OVMF_VARS:-}"
+if [ -n "$OVMF_CODE" ] || [ -n "$OVMF_VARS" ]; then
+  if [ ! -r "$OVMF_CODE" ] || [ ! -s "$OVMF_CODE" ] ||
+     [ ! -r "$OVMF_VARS" ] || [ ! -s "$OVMF_VARS" ]; then
+    echo "ERROR: OVMF_CODE and OVMF_VARS overrides must both name readable, non-empty files."
+    exit 1
+  fi
+else
+  for pair in \
+    "/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd" \
+    "/usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd"; do
+    IFS=: read -r code vars <<< "$pair"
+    if [ -r "$code" ] && [ -s "$code" ] && [ -r "$vars" ] && [ -s "$vars" ]; then
+      OVMF_CODE="$code"
+      OVMF_VARS="$vars"
+      break
+    fi
+  done
+fi
+if [ -z "$OVMF_CODE" ]; then
+  echo "ERROR: complete OVMF CODE/VARS firmware pair not found. Install package 'ovmf'."
+  exit 1
+fi
+
+QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
+if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
+  echo "ERROR: QEMU executable not found: $QEMU_BIN"
+  exit 1
+fi
+TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
+if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
+  echo "ERROR: timeout executable not found: $TIMEOUT_BIN"
   exit 1
 fi
 
 WORK="$(mktemp -d)"
 RUN="$WORK/boot.raw"
 LOG="$WORK/boot.log"
+OVMF_VARS_RUN="$WORK/OVMF_VARS.fd"
 trap 'rm -rf "$WORK"' EXIT
+
+# 每次测试使用独立的可写变量盘，避免修改系统安装的 OVMF 模板。
+cp "$OVMF_VARS" "$OVMF_VARS_RUN"
 
 # 解压（若为 .gz）
 case "$IMG" in
@@ -46,16 +78,18 @@ case "$IMG" in
 esac
 
 echo "[smoke] Image: $IMG"
-echo "[smoke] OVMF : $OVMF"
+echo "[smoke] OVMF CODE: $OVMF_CODE"
+echo "[smoke] OVMF VARS: $OVMF_VARS_RUN (copy of $OVMF_VARS)"
 echo "[smoke] Booting with QEMU (TCG), timeout ${BOOT_TIMEOUT:-150}s ..."
 
 set +e
-timeout "${BOOT_TIMEOUT:-150}s" qemu-system-x86_64 \
+"$TIMEOUT_BIN" "${BOOT_TIMEOUT:-150}s" "$QEMU_BIN" \
   -machine q35,accel=tcg \
   -cpu max \
   -m 1024 \
   -smp 2 \
-  -bios "$OVMF" \
+  -drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE" \
+  -drive "if=pflash,format=raw,unit=1,file=$OVMF_VARS_RUN" \
   -drive file="$RUN",format=raw,if=virtio \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
@@ -66,7 +100,10 @@ set -e
 
 # 可审计性：始终打印 QEMU 真实 exit code、init 状态、NIC、命中的 fatal marker。
 # 仅用于定位，不因此放宽任何门禁判定。
-mapfile -t nics < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
+nics=()
+while IFS= read -r nic; do
+  nics+=("$nic")
+done < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
 FATAL_MARKER="$(grep -oE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG" | head -n1 || true)"
 # init complete 诊断：干净输出，不重复打印 0
 if grep -q 'init complete' "$LOG"; then
