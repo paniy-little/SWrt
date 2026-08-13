@@ -10,8 +10,8 @@
 # 用法：
 #   vm-smoke-test.sh [<image>]   # 缺省时在 openwrt/bin/targets/x86/64 下自动查找
 #
-# 说明：这是 smoke test，不是完整集成测试。只以「boot log + init complete」
-# 作为主要门禁，不搭建完整虚拟网络实验室。
+# 说明：这是 smoke test，不是完整集成测试。以 procd 进入 init、控制台就绪、
+# 双网卡识别及无 fatal marker 作为门禁，不搭建完整虚拟网络实验室。
 # =============================================================================
 set -euo pipefail
 
@@ -56,17 +56,32 @@ if ! command -v "$QEMU_BIN" >/dev/null 2>&1; then
   echo "ERROR: QEMU executable not found: $QEMU_BIN"
   exit 1
 fi
-TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
-if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
-  echo "ERROR: timeout executable not found: $TIMEOUT_BIN"
-  exit 1
-fi
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-150}"
+case "$BOOT_TIMEOUT" in
+  ''|*[!0-9]*) echo "ERROR: BOOT_TIMEOUT must be a positive integer"; exit 1 ;;
+  0) echo "ERROR: BOOT_TIMEOUT must be greater than zero"; exit 1 ;;
+esac
+BOOT_STABILITY_SECONDS="${BOOT_STABILITY_SECONDS:-5}"
+case "$BOOT_STABILITY_SECONDS" in
+  ''|*[!0-9]*) echo "ERROR: BOOT_STABILITY_SECONDS must be a non-negative integer"; exit 1 ;;
+esac
 
 WORK="$(mktemp -d)"
 RUN="$WORK/boot.raw"
 LOG="$WORK/boot.log"
 OVMF_VARS_RUN="$WORK/OVMF_VARS.fd"
-trap 'rm -rf "$WORK"' EXIT
+QEMU_PID=""
+
+cleanup() {
+  if [ -n "$QEMU_PID" ] && kill -0 "$QEMU_PID" 2>/dev/null; then
+    kill "$QEMU_PID" 2>/dev/null || true
+    wait "$QEMU_PID" 2>/dev/null || true
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # 每次测试使用独立的可写变量盘，避免修改系统安装的 OVMF 模板。
 cp "$OVMF_VARS" "$OVMF_VARS_RUN"
@@ -80,10 +95,22 @@ esac
 echo "[smoke] Image: $IMG"
 echo "[smoke] OVMF CODE: $OVMF_CODE"
 echo "[smoke] OVMF VARS: $OVMF_VARS_RUN (copy of $OVMF_VARS)"
-echo "[smoke] Booting with QEMU (TCG), timeout ${BOOT_TIMEOUT:-150}s ..."
+echo "[smoke] Booting with QEMU (TCG), timeout ${BOOT_TIMEOUT}s ..."
 
-set +e
-"$TIMEOUT_BIN" "${BOOT_TIMEOUT:-150}s" "$QEMU_BIN" \
+fatal_marker_from_log() {
+  grep -oE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG" | head -n1 || true
+}
+
+readiness_markers_present() {
+  grep -Fq 'procd: - init -' "$LOG" &&
+    grep -Fq 'Please press Enter to activate this console.' "$LOG"
+}
+
+seen_nic_count() {
+  { grep -oE '\beth[0-9]+\b' "$LOG" || true; } | sort -u | wc -l | tr -d ' '
+}
+
+"$QEMU_BIN" \
   -machine q35,accel=tcg \
   -cpu max \
   -m 1024 \
@@ -94,25 +121,59 @@ set +e
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
   -nographic -no-reboot \
-  > "$LOG" 2>&1
+  > "$LOG" 2>&1 &
+QEMU_PID=$!
+
+BOOT_STARTED=$SECONDS
+READY_STARTED=""
+STOP_REASON="qemu-exited"
+while kill -0 "$QEMU_PID" 2>/dev/null; do
+  if [ -n "$(fatal_marker_from_log)" ]; then
+    STOP_REASON="fatal-marker"
+    break
+  fi
+  if readiness_markers_present && [ "$(seen_nic_count)" -ge 2 ]; then
+    if [ -z "$READY_STARTED" ]; then
+      READY_STARTED=$SECONDS
+    fi
+    if [ $((SECONDS - READY_STARTED)) -ge "$BOOT_STABILITY_SECONDS" ]; then
+      STOP_REASON="boot-ready"
+      break
+    fi
+  else
+    READY_STARTED=""
+  fi
+  if [ $((SECONDS - BOOT_STARTED)) -ge "$BOOT_TIMEOUT" ]; then
+    STOP_REASON="timeout"
+    break
+  fi
+  sleep 1
+done
+
+if kill -0 "$QEMU_PID" 2>/dev/null; then
+  kill "$QEMU_PID" 2>/dev/null || true
+fi
+set +e
+wait "$QEMU_PID"
 QEMU_EXIT=$?
 set -e
+QEMU_PID=""
 
-# 可审计性：始终打印 QEMU 真实 exit code、init 状态、NIC、命中的 fatal marker。
+# 可审计性：始终打印 QEMU 真实 exit code、停止原因、启动标记、NIC 和 fatal marker。
 # 仅用于定位，不因此放宽任何门禁判定。
 nics=()
 while IFS= read -r nic; do
   nics+=("$nic")
 done < <(grep -oE '\beth[0-9]+\b' "$LOG" | sort -u)
-FATAL_MARKER="$(grep -oE "Kernel panic|Oops|BUG:|invalid module format|Unknown symbol|VFS: Cannot open root|Failed to mount|segfault|Request for unknown module" "$LOG" | head -n1 || true)"
-# init complete 诊断：干净输出，不重复打印 0
-if grep -q 'init complete' "$LOG"; then
-    INIT_COMPLETE="yes"
+FATAL_MARKER="$(fatal_marker_from_log)"
+if readiness_markers_present; then
+  BOOT_READY="yes"
 else
-    INIT_COMPLETE="no"
+  BOOT_READY="no"
 fi
 echo "[smoke] qemu exit=${QEMU_EXIT}"
-echo "[smoke] init complete=${INIT_COMPLETE}"
+echo "[smoke] stop reason=${STOP_REASON}"
+echo "[smoke] boot ready=${BOOT_READY}"
 echo "[smoke] NICs=${nics[*]:-none}"
 echo "[smoke] fatal marker=${FATAL_MARKER:-none}"
 echo "[smoke] ---- boot log tail ----"
@@ -124,19 +185,18 @@ if [ -n "$FATAL_MARKER" ]; then
   exit 1
 fi
 
-# 成功标记：OpenWrt 标准 init 完成
-if grep -q "init complete" "$LOG"; then
-  echo "[smoke] PASS: OpenWrt 'init complete' reached"
-  # 双 NIC 门禁：从 boot log 提取唯一接口名，至少识别 2 块。
-  # 仅匹配完整 ethN 接口名，避免把 enabled/entropy 等普通单词误判为接口。
-  nic_count="${#nics[@]}"
-  echo "[smoke] unique NIC interface names seen: $nic_count (${nics[*]:-none})"
-  if [ "$nic_count" -lt 2 ]; then
-    echo "::error::Expected at least 2 NICs, only saw $nic_count"
-    exit 1
-  fi
-  exit 0
+# 双 NIC 门禁：从 boot log 提取唯一接口名，至少识别 2 块。
+# 仅匹配完整 ethN 接口名，避免把 enabled/entropy 等普通单词误判为接口。
+nic_count="${#nics[@]}"
+echo "[smoke] unique NIC interface names seen: $nic_count (${nics[*]:-none})"
+if [ "$nic_count" -lt 2 ]; then
+  echo "::error::Expected at least 2 NICs, only saw $nic_count"
+  exit 1
 fi
 
-echo "::error::VM boot did not reach 'init complete' within timeout (qemu exit=${QEMU_EXIT})"
-exit 1
+if [ "$BOOT_READY" != "yes" ]; then
+  echo "::error::VM boot did not reach procd init and console readiness within ${BOOT_TIMEOUT}s (qemu exit=${QEMU_EXIT})"
+  exit 1
+fi
+
+echo "[smoke] PASS: procd init, console readiness, and dual NIC gates reached"

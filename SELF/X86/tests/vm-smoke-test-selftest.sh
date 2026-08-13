@@ -1,5 +1,5 @@
 #!/bin/bash
-# 快速验证 smoke harness 的 OVMF 参数契约，无需真实固件或 QEMU。
+# 快速验证 smoke harness 的固件参数与启动门禁，无需真实固件或 QEMU。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,9 +11,10 @@ IMAGE="$WORK/test.img"
 OVMF_CODE_FIXTURE="$WORK/OVMF_CODE_4M.fd"
 OVMF_VARS_FIXTURE="$WORK/OVMF_VARS_4M.fd"
 QEMU_MOCK="$WORK/qemu-system-x86_64"
-TIMEOUT_MOCK="$WORK/timeout"
 ARGS_LOG="$WORK/qemu.args"
-OUTPUT_LOG="$WORK/smoke.output"
+SUCCESS_LOG="$WORK/success.output"
+MISSING_CONSOLE_LOG="$WORK/missing-console.output"
+FATAL_LOG="$WORK/fatal.output"
 
 printf 'image\n' > "$IMAGE"
 printf 'code fixture\n' > "$OVMF_CODE_FIXTURE"
@@ -32,26 +33,42 @@ for arg in "$@"; do
       ;;
   esac
 done
-printf '%s\n' 'procd: - init complete -' 'eth0: link up' 'eth1: link up'
+case "${QEMU_MOCK_MODE:-success}" in
+  success)
+    printf '%s\n' \
+      '[   12.314668] procd: - init -' \
+      'Please press Enter to activate this console.' \
+      '[   38.151969] virtio_net virtio0 eth0: entered allmulticast mode' \
+      '[   38.277420] 8021q: adding VLAN 0 to HW filter on device eth1'
+    ;;
+  missing-console)
+    printf '%s\n' \
+      '[   12.314668] procd: - init -' \
+      'eth0: link up' \
+      'eth1: link up'
+    ;;
+  fatal)
+    printf '%s\n' \
+      '[   12.314668] procd: - init -' \
+      'Please press Enter to activate this console.' \
+      'eth0: link up' \
+      'eth1: link up' \
+      'Kernel panic - not syncing: selftest'
+    ;;
+esac
+exec sleep 30
 EOF
 chmod +x "$QEMU_MOCK"
-
-cat > "$TIMEOUT_MOCK" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-shift
-exec "$@"
-EOF
-chmod +x "$TIMEOUT_MOCK"
 
 QEMU_ARGS_LOG="$ARGS_LOG" \
 OVMF_CODE="$OVMF_CODE_FIXTURE" \
 OVMF_VARS="$OVMF_VARS_FIXTURE" \
 QEMU_BIN="$QEMU_MOCK" \
-TIMEOUT_BIN="$TIMEOUT_MOCK" \
 BOOT_TIMEOUT=5 \
-  "$SMOKE" "$IMAGE" > "$OUTPUT_LOG" || {
-    cat "$OUTPUT_LOG"
+BOOT_STABILITY_SECONDS=1 \
+QEMU_MOCK_MODE=success \
+  "$SMOKE" "$IMAGE" > "$SUCCESS_LOG" || {
+    cat "$SUCCESS_LOG"
     exit 1
   }
 
@@ -62,7 +79,37 @@ if grep -Fxq -- '-bios' "$ARGS_LOG"; then
   exit 1
 fi
 grep -Fxq 'vars template' "$OVMF_VARS_FIXTURE"
-grep -Fq "[smoke] PASS: OpenWrt 'init complete' reached" "$OUTPUT_LOG"
-grep -Fq '[smoke] unique NIC interface names seen: 2 (eth0 eth1)' "$OUTPUT_LOG"
+grep -Fq '[smoke] stop reason=boot-ready' "$SUCCESS_LOG"
+grep -Fq '[smoke] boot ready=yes' "$SUCCESS_LOG"
+grep -Fq '[smoke] unique NIC interface names seen: 2 (eth0 eth1)' "$SUCCESS_LOG"
+grep -Fq '[smoke] PASS: procd init, console readiness, and dual NIC gates reached' "$SUCCESS_LOG"
 
-echo "[selftest] PASS: OVMF pflash pair, isolated VARS, and boot gates verified"
+if QEMU_ARGS_LOG="$ARGS_LOG" \
+  OVMF_CODE="$OVMF_CODE_FIXTURE" \
+  OVMF_VARS="$OVMF_VARS_FIXTURE" \
+  QEMU_BIN="$QEMU_MOCK" \
+  BOOT_TIMEOUT=2 \
+  BOOT_STABILITY_SECONDS=1 \
+  QEMU_MOCK_MODE=missing-console \
+    "$SMOKE" "$IMAGE" > "$MISSING_CONSOLE_LOG"; then
+  echo "ERROR: missing console readiness marker was accepted"
+  exit 1
+fi
+grep -Fq '[smoke] stop reason=timeout' "$MISSING_CONSOLE_LOG"
+grep -Fq '::error::VM boot did not reach procd init and console readiness' "$MISSING_CONSOLE_LOG"
+
+if QEMU_ARGS_LOG="$ARGS_LOG" \
+  OVMF_CODE="$OVMF_CODE_FIXTURE" \
+  OVMF_VARS="$OVMF_VARS_FIXTURE" \
+  QEMU_BIN="$QEMU_MOCK" \
+  BOOT_TIMEOUT=5 \
+  BOOT_STABILITY_SECONDS=1 \
+  QEMU_MOCK_MODE=fatal \
+    "$SMOKE" "$IMAGE" > "$FATAL_LOG"; then
+  echo "ERROR: fatal marker was accepted"
+  exit 1
+fi
+grep -Fq '[smoke] stop reason=fatal-marker' "$FATAL_LOG"
+grep -Fq '::error::VM boot hit a fatal error marker: Kernel panic' "$FATAL_LOG"
+
+echo "[selftest] PASS: pflash, isolated VARS, real readiness, timeout, and fatal gates verified"
