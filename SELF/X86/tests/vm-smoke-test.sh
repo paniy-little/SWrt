@@ -59,7 +59,7 @@ timeout "${BOOT_TIMEOUT:-150}s" qemu-system-x86_64 \
   -drive file="$RUN",format=raw,if=virtio \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
-  -nographic -serial stdio -no-reboot \
+  -nographic -no-reboot \
   > "$LOG" 2>&1
 QEMU_EXIT=$?
 set -e
