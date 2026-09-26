@@ -67,6 +67,12 @@ jobs:
             --exclude='PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd' \
             source-repo/ target-repo/
 
+          # 这两项旧 IPv6 策略已停用。exclude 阻止上游重新导入，下面的清理
+          # 同时移除目标分支上被 rsync exclude 保留下来的历史副本。
+          # 历史源码保存在不参与固件 overlay 的 SELF/disabled-ipv6-hooks/。
+          rm -f target-repo/PATCH/files/etc/hotplug.d/iface/99-zzz-odhcpd* \
+                target-repo/PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd
+
           # 同步整个 .github/workflows/ 目录到 workflows-templates/
           if [ -d "source-repo/.github/workflows/" ]; then
             mkdir -p target-repo/workflows-templates/

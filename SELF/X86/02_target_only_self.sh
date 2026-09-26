@@ -65,6 +65,12 @@ mkdir -p ./files
 cp -a ../PATCH/files/. ./files/
 cp -a ../SELF/X86/common/files/. ./files/
 
+# 已停用的历史策略不得进入 firmware；也清理复用构建目录中的旧副本。
+rm -f ./files/etc/hotplug.d/iface/99-zzz-odhcpd* \
+      ./files/etc/uci-defaults/99-yunshu-disable-ipv6-pd
+chmod +x ./files/etc/uci-defaults/90-yunshu-network-hooks \
+         ./files/usr/libexec/swrt-mosdns-hotplug
+
 # 网络初始化：由 SELF/X86/common/files/etc/uci-defaults/99-x86-vm-network
 # 提供的 uci-defaults 脚本负责。uci-defaults 只会在该系统首次配置时执行并
 # 自删除，因此：
@@ -102,10 +108,11 @@ CHECK_FILES="$CHECK_FILES ./files/usr/bin/swrt-vm-perf"
 CHECK_FILES="$CHECK_FILES ./files/etc/config/swrt-vm-performance"
 CHECK_FILES="$CHECK_FILES ./files/etc/init.d/swrt-vm-performance"
 CHECK_FILES="$CHECK_FILES ./files/etc/sysctl.d/90-swrt-x86-network.conf"
-# PATCH/files 中预期进入 firmware 的关键文件
-if [ -f ../PATCH/files/etc/uci-defaults/99-yunshu-disable-ipv6-pd ]; then
-    CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/99-yunshu-disable-ipv6-pd"
-fi
+# SELF 固件策略：停用历史 IPv6 脚本，并安装受限、合并事件的 MosDNS 钩子。
+CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/90-yunshu-network-hooks"
+CHECK_FILES="$CHECK_FILES ./files/etc/hotplug.d/iface/99-mosdns"
+CHECK_FILES="$CHECK_FILES ./files/usr/libexec/swrt-mosdns-hotplug"
+CHECK_FILES="$CHECK_FILES ./files/usr/share/swrt/99-mosdns"
 # X86 覆盖版 hotplug（SELF 覆盖 PATCH，Hyper-V hv_netvsc ring 默认调优）
 if [ -f ../SELF/X86/common/files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers ]; then
     CHECK_FILES="$CHECK_FILES ./files/etc/hotplug.d/net/01-maximize_nic_rx_tx_buffers"

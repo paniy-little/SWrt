@@ -100,3 +100,21 @@ commit/ref lock 以保证可复现。
   后，确认最终层级为 `files/etc/...`（非 `files/files/...`），且关键文件存在。
 - x86 kernel 校验：`02_target_only_self.sh` 直接读取 `target/linux/x86/Makefile` 的
   `KERNEL_PATCHVER`，不再依赖 rockchip target。
+
+## IPv6 旧策略与 MosDNS 热插拔
+
+- 两个旧 IPv6 脚本已移到 `SELF/disabled-ipv6-hooks/` 存档，不进入固件执行目录。
+  构建合并后会清理旧副本；`90-yunshu-network-hooks` 会将 sysupgrade 恢复的旧入口
+  备份到 `/etc/yunshu-disabled-ipv6-hooks/`，避免 `.bak` 被 hotplug 当作脚本执行。
+- 不再强制设置 `reqprefix=no` 或删除 `ip6assign`；迁移不改已有 network/dhcp UCI。
+  曾被旧脚本写入的配置不会被猜测性恢复，继续以管理员当前配置为准。
+- MosDNS 钩子只处理本 profile 的主上游 `wan` / `wan6` 的 `ifup`。
+  LAN、loopback、modem、xiaomi_wan 等其他接口以及 `ifdown` / `ifupdate` 不触发重启。
+  使用单调启动时间等待最后一次事件后 10 秒；连续事件合并，互斥锁保证单个 worker。
+  间隔超过合并窗口的新事件仍会单独处理。禁用 MosDNS 或两条主上游均已离线时跳过。
+- MosDNS 的正常开机启动保持原行为；这里只减少热插拔造成的重复重启。
+  worker 在 `/var/run` 保存临时状态，不阻塞 hotplug 队列，也不把互斥锁传入 procd。
+  `flock` 由 x86 seed 显式选择。不同上游命名的 profile 需要同步调整钩子及 worker 的接口列表。
+- `.github/workflows/sync-files.yml` 对旧路径既排除导入，又清理目标分支的历史副本；
+  新策略均在受同步保护的 `SELF/` 层。升级迁移使用 `/usr/share/swrt/99-mosdns` 模板
+  恢复正确入口，覆盖旧配置备份中的 MosDNS 钩子。

@@ -1,0 +1,65 @@
+#!/bin/sh
+# Coalesce WAN/WAN6 ifup events without blocking netifd's hotplug queue.
+# State is volatile; flock releases locks even when a worker is killed.
+umask 077
+state=/var/run/swrt-mosdns-hotplug
+quiet_seconds=10
+enabled() {
+    [ -x /etc/init.d/mosdns ] && [ "$(uci -q get mosdns.config.enabled)" = 1 ]
+}
+uptime_seconds() {
+    cut -d . -f 1 /proc/uptime
+}
+command -v flock >/dev/null 2>&1 || {
+    logger -t swrt-mosdns 'Missing flock; automatic hotplug restart skipped'
+    exit 1
+}
+mkdir -p "$state" || exit 1
+exec 8>"$state/state.lock"
+
+case "${1:-}" in
+    schedule)
+        [ "$ACTION" = ifup ] || exit 0
+        case "$INTERFACE" in wan|wan6) ;; *) exit 0 ;; esac
+        enabled || exit 0
+        flock -x 8 || exit 1
+        printf '%s %s\n' "$(uptime_seconds)" "$INTERFACE" > "$state/pending"
+        flock -u 8
+        "$0" worker </dev/null >/dev/null 2>&1 8>&- &
+        ;;
+    worker)
+        exec 9>"$state/worker.lock"
+        flock -n 9 || exit 0
+        while :; do
+            flock -x 8 || exit 1
+            if [ ! -s "$state/pending" ]; then
+                # Release the worker while still holding state.lock so a new
+                # scheduler cannot lose an event during worker shutdown.
+                flock -u 9
+                flock -u 8
+                exit 0
+            fi
+            read -r last_event iface < "$state/pending"
+            now=$(uptime_seconds)
+            remaining=$((last_event + quiet_seconds - now))
+            if [ "$remaining" -gt 0 ]; then
+                flock -u 8
+                sleep "$remaining"
+                continue
+            fi
+            rm -f "$state/pending"
+            flock -u 8
+            enabled || continue
+            . /lib/functions/network.sh
+            network_flush_cache
+            network_is_up wan || network_is_up wan6 || continue
+            # Do not leak lock descriptors into init/procd child processes.
+            if /etc/init.d/mosdns restart </dev/null 8>&- 9>&-; then
+                logger -t swrt-mosdns "Restarted after settled WAN events (last=$iface)"
+            else
+                logger -t swrt-mosdns "Restart failed after WAN event (last=$iface)"
+            fi
+        done
+        ;;
+    *) exit 2 ;;
+esac

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Retire restored legacy hooks before 99-* defaults can run.
+# Keep network/dhcp UCI state intact; administrator choices remain authoritative.
+archive=/etc/yunshu-disabled-ipv6-hooks
+for script in /etc/hotplug.d/iface/99-zzz-odhcpd* \
+              /etc/uci-defaults/99-yunshu-disable-ipv6-pd; do
+    [ -f "$script" ] || continue
+    mkdir -p "$archive" || exit 1
+    chmod 700 "$archive" || exit 1
+    saved=$(mktemp "$archive/${script##*/}.XXXXXX") || exit 1
+    cp "$script" "$saved" && chmod 600 "$saved" && rm -f "$script" || exit 1
+done
+
+# sysupgrade can restore the old package hook over the new overlay copy.
+# Keep an authoritative template outside hotplug.d and reinstall it on upgrade.
+template=/usr/share/swrt/99-mosdns
+hook=/etc/hotplug.d/iface/99-mosdns
+[ -f "$template" ] || exit 1
+if ! cmp -s "$template" "$hook"; then
+    if [ -f "$hook" ]; then
+        mkdir -p "$archive" && chmod 700 "$archive" || exit 1
+        saved=$(mktemp "$archive/99-mosdns.XXXXXX") || exit 1
+        cp "$hook" "$saved" && chmod 600 "$saved" || exit 1
+    fi
+    mkdir -p /etc/hotplug.d/iface || exit 1
+    tmp=$(mktemp /etc/hotplug.d/iface/.swrt-mosdns.XXXXXX) || exit 1
+    cp "$template" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$hook" || {
+        rm -f "$tmp"
+        exit 1
+    }
+fi
+exit 0
