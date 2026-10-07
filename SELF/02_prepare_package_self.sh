@@ -294,9 +294,7 @@ sed -i '/\/etc\/passwd/a\/etc\/yunshu.sh' ./package/base-files/Makefile
 # echo "上面是内容"
 # 网络初始化（eth0/eth1 顺序）已由 SELF/X86 的首次启动 uci-defaults 安全处理，
 # 不再对 base-files 默认配置做全局硬编码改名，避免覆盖用户已有配置。
-#修复fail2ban
-#修复fail2ban
-sed -i '/PKG_CPE_ID:=cpe:\/a:fail2ban:fail2ban/a PKG_BUILD_DEPENDS:=python-setuptools/host' feeds/packages/net/fail2ban/Makefile
+# SSH blocking is provided by the OpenWrt banip + luci-app-banip packages in the X86 seed.
 
 ### 最后的收尾工作 ###
 # Lets Fuck

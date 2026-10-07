@@ -33,6 +33,13 @@ SELF/X86/
 - **CPU mitigations**：默认保持内核开启（生产构建不注入 `mitigations=off`）。
 - **x86-64 指令集**：默认 `generic x86-64`，不启用 x86-64-v2/v3，保证 VM 迁移兼容。
 
+## SSH 登录防护
+
+- 默认安装并启用 `banip` 和 `luci-app-banip`，管理入口位于 LuCI「服务 → banIP」。
+- X86 默认只启用 SSH/LuCI 登录失败日志监控：同一来源 3 次失败后临时封禁 1 天；不启用 IP feeds 或额外的 ICMP/SYN/UDP 防洪规则。
+- `/etc/banip/banip.allowlist` 保留下级路由器地址 `192.168.2.2`，避免管理连接再次误封。由于上游 NAT 会让这条链路上的设备共享该来源地址，这些设备也会一起豁免；需要更细粒度封禁时，应先让 OpenWrt 能看到各客户端独立地址。
+- Fail2ban 不再包含在默认 X86 镜像中。其他 profile 不受此 X86 默认项影响。
+
 ## Firmware 格式
 
 - Hyper-V 主产物：`combined-efi.vhdx`

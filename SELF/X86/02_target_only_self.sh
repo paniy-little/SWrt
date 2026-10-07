@@ -106,6 +106,9 @@ CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/98-swrt-vm-performance"
 # SELF/X86/common/files 中预期进入 firmware 的关键文件
 CHECK_FILES="$CHECK_FILES ./files/usr/bin/swrt-vm-perf"
 CHECK_FILES="$CHECK_FILES ./files/etc/config/swrt-vm-performance"
+CHECK_FILES="$CHECK_FILES ./files/etc/config/banip"
+CHECK_FILES="$CHECK_FILES ./files/etc/banip/banip.allowlist"
+CHECK_FILES="$CHECK_FILES ./files/etc/uci-defaults/99-banip-enable"
 CHECK_FILES="$CHECK_FILES ./files/etc/init.d/swrt-vm-performance"
 CHECK_FILES="$CHECK_FILES ./files/etc/sysctl.d/90-swrt-x86-network.conf"
 # SELF 固件策略：停用历史 IPv6 脚本，并安装受限、合并事件的 MosDNS 钩子。

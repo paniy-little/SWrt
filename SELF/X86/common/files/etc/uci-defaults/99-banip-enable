@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Enable the package service for subsequent boots; the banIP UCI defaults
+# are supplied by /etc/config/banip in the same firmware overlay.
+/etc/init.d/banip enable
+
+exit 0
