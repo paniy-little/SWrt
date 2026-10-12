@@ -1,0 +1,48 @@
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -4140,6 +4140,40 @@ int dev_queue_xmit(struct sk_buff *skb)
+ }
+ EXPORT_SYMBOL(dev_queue_xmit);
+ 
++/*
++ * dev_fast_xmit - bypass qdisc and transmit directly to driver
++ * Optional performance optimization for Shortcut-FE.
++ */
++int dev_fast_xmit(struct sk_buff *skb, struct net_device *dev, netdev_features_t features)
++{
++	struct netdev_queue *txq;
++	int cpu;
++	int ret = NETDEV_TX_BUSY;
++
++	if (unlikely(!(dev->flags & IFF_UP))) {
++		kfree_skb(skb);
++		return NET_XMIT_DROP;
++	}
++
++	skb->dev = dev;
++	cpu = smp_processor_id();
++	txq = netdev_core_pick_tx(dev, skb, NULL);
++
++	if (HARD_TX_TRYLOCK(dev, txq)) {
++		if (!netif_xmit_stopped(txq)) {
++			ret = netdev_start_xmit(skb, dev, txq, 0);
++		}
++		HARD_TX_UNLOCK(dev, txq);
++	}
++
++	if (ret != NETDEV_TX_OK) {
++		dev_queue_xmit(skb);
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(dev_fast_xmit);
++
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -3100,6 +3100,8 @@ int dev_queue_xmit(struct sk_buff *skb);
+ int dev_queue_xmit_accel(struct sk_buff *skb, struct net_device *sb_dev);
+ 
++#define DEV_FAST_XMIT_SUPPORTED 1
++int dev_fast_xmit(struct sk_buff *skb, struct net_device *dev, netdev_features_t features);
++
+ #endif /* _LINUX_NETDEVICE_H */

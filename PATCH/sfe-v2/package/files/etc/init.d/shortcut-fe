@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+
+start() {
+	echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal 2>/dev/null
+	modprobe qca-nss-sfe 2>/dev/null
+	modprobe shortcut-fe-cm 2>/dev/null
+}
+
+stop() {
+	rmmod shortcut-fe-cm 2>/dev/null || rmmod shortcut_fe_cm 2>/dev/null
+	rmmod qca-nss-sfe 2>/dev/null || rmmod qca_nss_sfe 2>/dev/null
+	echo 0 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal 2>/dev/null
+}
+
+restart() {
+	stop
+	start
+}

@@ -1,0 +1,210 @@
+diff --git a/Makefile b/Makefile
+index 03fb87c..5463759 100644
+--- a/Makefile
++++ b/Makefile
+@@ -6,7 +6,7 @@ KERNELVERSION := $(word 1, $(subst ., ,$(KERNELVERSION))).$(word 2, $(subst ., ,
+ SFE_BASE_OBJS := sfe.o sfe_init.o
+ SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o sfe_ipv4_pppoe_br.o sfe_ipv4_multicast.o
+ SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_pppoe_br.o sfe_ipv6_multicast.o sfe_ipv6_etherip.o sfe_ipv6_frag.o
+-SFE_PPPOE_OBJS := sfe_pppoe.o sfe_pppoe_mgr.o
++SFE_PPPOE_OBJS := sfe_pppoe.o
+ ifndef SFE_256M_PROFILE
+ ifndef SFE_16M_PROFILE
+ SFE_IPV4_OBJS += sfe_ipv4_tun6rd.o sfe_ipv4_esp.o
+@@ -27,6 +27,8 @@ ccflags-y += -DSFE_L2TPV3_ENABLED
+ endif
+ 
+ obj-m += qca-nss-sfe.o
++obj-m += shortcut-fe-cm.o
++shortcut-fe-cm-objs := sfe_cm.o
+ 
+ #
+ # Base files
+@@ -71,4 +73,5 @@ ccflags-y += -DSFE_DSLITE_ENABLE
+ endif
+ endif
+ 
+-ccflags-y += -Werror -Wall -Iexports/
++ccflags-y += -Wall -I$(src)/exports/ -I$(src) -include $(src)/sfe_compat.h
++
+diff --git a/sfe.c b/sfe.c
+index 66c6187..5d428cf 100644
+--- a/sfe.c
++++ b/sfe.c
+@@ -39,7 +39,7 @@
+ 
+ extern int max_ipv4_conn;
+ extern int max_ipv6_conn;
+-extern bool fast_tc_filter;
++bool fast_tc_filter = false;
+ uint8_t sfe_fls_flush_on_hwm_enable;
+ 
+ #define SFE_MESSAGE_VERSION 0x1
+diff --git a/sfe_ipv4_tcp.c b/sfe_ipv4_tcp.c
+index 55769af..524cd9f 100644
+--- a/sfe_ipv4_tcp.c
++++ b/sfe_ipv4_tcp.c
+@@ -163,8 +163,6 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ #ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+ 	struct net *net;
+ #endif
+-	struct netdev_hw_offload_ops *offload_ops = NULL;
+-	bool tun_vp_tx = false;
+ 
+ 	/*
+ 	 * Is our packet too short to contain a valid TCP header?
+@@ -933,7 +931,6 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 	}
+ 	features = cm->features;
+ 	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
+-	tun_vp_tx = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
+ 
+ 	/*
+ 	 * In the map-t tunnel, it needs correct transport header.
+@@ -943,22 +940,6 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 
+ 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+ 
+-	/*
+-	 * For tunnel Packets check if tunnel is active in PPE.
+-	 * If tunnel is active queue the packet to tunnel VP
+-	 */
+-	if (unlikely(tun_vp_tx)) {
+-		offload_ops = rcu_dereference(xmit_dev->offload_ops);
+-		if (likely(offload_ops && offload_ops->xmit)) {
+-			mem_debug_update_skb(skb);
+-			if (likely(offload_ops->xmit(xmit_dev, skb))) {
+-				this_cpu_inc(si->stats_pcpu->ppe_tun_vp_tx64);
+-				rcu_read_unlock();
+-				return 1;
+-			}
+-		}
+-	}
+-
+ 	rcu_read_unlock();
+ 
+ 	/*
+diff --git a/sfe_ipv4_udp.c b/sfe_ipv4_udp.c
+index baedc0f..182956e 100644
+--- a/sfe_ipv4_udp.c
++++ b/sfe_ipv4_udp.c
+@@ -169,8 +169,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ #ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+ 	struct net *net;
+ #endif
+-	struct netdev_hw_offload_ops *offload_ops = NULL;
+-	bool tun_vp_tx = false;
+ 
+ 	/*
+ 	 * Is our packet too short to contain a valid UDP header?
+@@ -773,7 +771,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 	features = cm->features;
+ 
+ 	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
+-	tun_vp_tx = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
+ 
+ 	/*
+ 	 * In the map-t tunnel, it needs correct transport header.
+@@ -790,22 +787,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 
+ 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+ 
+-	/*
+-	 * For tunnel Packets check if tunnel is active in PPE.
+-	 * If tunnel is active queue the packet to tunnel VP
+-	 */
+-	if (unlikely(tun_vp_tx)) {
+-		offload_ops = rcu_dereference(xmit_dev->offload_ops);
+-		if (likely(offload_ops && offload_ops->xmit)) {
+-			mem_debug_update_skb(skb);
+-			if (likely(offload_ops->xmit(xmit_dev, skb))) {
+-				this_cpu_inc(si->stats_pcpu->ppe_tun_vp_tx64);
+-				rcu_read_unlock();
+-				return 1;
+-			}
+-		}
+-	}
+-
+ 	rcu_read_unlock();
+ 
+ 	/*
+diff --git a/sfe_ipv6_tcp.c b/sfe_ipv6_tcp.c
+index 5592475..a55f02f 100644
+--- a/sfe_ipv6_tcp.c
++++ b/sfe_ipv6_tcp.c
+@@ -132,8 +132,6 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ #ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+ 	struct net *net;
+ #endif
+-	struct netdev_hw_offload_ops *offload_ops = NULL;
+-	bool tun_vp_tx = false;
+ 
+ 	/*
+ 	 * Is our packet too short to contain a valid TCP header?
+@@ -904,26 +902,9 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ 	features = cm->features;
+ 
+ 	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
+-	tun_vp_tx = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
+ 
+ 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+ 
+-	/*
+-	 * For tunnel Packets check if tunnel is active in PPE.
+-	 * If tunnel is active queue the packet to tunnel VP.
+-	 */
+-	if (unlikely(tun_vp_tx)) {
+-		offload_ops = rcu_dereference(xmit_dev->offload_ops);
+-		if (likely(offload_ops && offload_ops->xmit)) {
+-			mem_debug_update_skb(skb);
+-			if (likely(offload_ops->xmit(xmit_dev, skb))) {
+-				this_cpu_inc(si->stats_pcpu->ppe_tun_vp_tx64);
+-				rcu_read_unlock();
+-				return 1;
+-			}
+-		}
+-	}
+-
+ 	rcu_read_unlock();
+ 
+ 	/*
+diff --git a/sfe_ipv6_udp.c b/sfe_ipv6_udp.c
+index d4df982..bad9953 100644
+--- a/sfe_ipv6_udp.c
++++ b/sfe_ipv6_udp.c
+@@ -154,8 +154,6 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ #ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+ 	struct net *net;
+ #endif
+-	struct netdev_hw_offload_ops *offload_ops = NULL;
+-	bool tun_vp_tx = false;
+ 
+ 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
+ 
+@@ -763,26 +761,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ 	features = cm->features;
+ 
+ 	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
+-	tun_vp_tx = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
+ 
+ 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+ 
+-	/*
+-	 * For tunnel Packets check if tunnel is active in PPE.
+-	 * If tunnel is active queue the packet to tunnel VP
+-	 */
+-	if (unlikely(tun_vp_tx)) {
+-		offload_ops = rcu_dereference(xmit_dev->offload_ops);
+-		if (likely(offload_ops && offload_ops->xmit)) {
+-			mem_debug_update_skb(skb);
+-			if (likely(offload_ops->xmit(xmit_dev, skb))) {
+-				this_cpu_inc(si->stats_pcpu->ppe_tun_vp_tx64);
+-				rcu_read_unlock();
+-				return 1;
+-			}
+-		}
+-	}
+-
+ 	rcu_read_unlock();
+ 
+ 	/*
