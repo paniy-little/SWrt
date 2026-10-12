@@ -385,19 +385,19 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 				for (i = 0; i < stack.num_paths; i++) {
 					struct net_device_path *path = &stack.path[i];
 					if (path->type == DEV_PATH_PPPOE && path->dev) {
-						mac_dev = path->dev;
+						mac_dev = (struct net_device *)path->dev;
 						if (is_pppoe) {
 							*is_pppoe = true;
 							if (pppoe_sid)
-								*pppoe_sid = path->encap.pppoe.sid;
+								*pppoe_sid = path->encap.id;
 							if (pppoe_mac)
-								memcpy(pppoe_mac, path->encap.pppoe.remote_dev, ETH_ALEN);
+								memcpy(pppoe_mac, path->encap.h_dest, ETH_ALEN);
 							if (top_dev) {
 								dev_hold(dst->dev);
 								*top_dev = dst->dev;
 							}
 						}
-						memcpy(mac_addr, path->encap.pppoe.remote_dev, ETH_ALEN);
+						memcpy(mac_addr, path->encap.h_dest, ETH_ALEN);
 						dev_hold(mac_dev);
 						*dev = mac_dev;
 						rcu_read_unlock();
@@ -490,7 +490,7 @@ static void sfe_cm_v2_ipv4_sync_many_callback(void *app_data, struct sfe_ipv4_ms
 	struct sfe_ipv4_conn_sync_many_msg *many;
 	int i;
 
-	if (unlikely(!msg || msg->cm.type != SFE_RX_CONN_STATS_SYNC_MANY_MSG))
+	if (unlikely(!msg || msg->cm.type != SFE_TX_CONN_STATS_SYNC_MANY_MSG))
 		return;
 
 	many = &msg->msg.conn_stats_many;
@@ -522,7 +522,7 @@ static void sfe_cm_v2_ipv6_sync_many_callback(void *app_data, struct sfe_ipv6_ms
 	struct sfe_ipv6_conn_sync_many_msg *many;
 	int i;
 
-	if (unlikely(!msg || msg->cm.type != SFE_RX_CONN_STATS_SYNC_MANY_MSG))
+	if (unlikely(!msg || msg->cm.type != SFE_TX_CONN_STATS_SYNC_MANY_MSG))
 		return;
 
 	many = &msg->msg.conn_stats_many;
@@ -592,7 +592,7 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	if (unlikely(nf_ct_is_dying(ct)))
 		return NF_ACCEPT;
 
-	if (unlikely(nf_ct_helper(ct)))
+	if (unlikely(nfct_help(ct)))
 		return NF_ACCEPT;
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
@@ -760,7 +760,7 @@ static int sfe_cm_conntrack_event(struct notifier_block *this, unsigned long eve
 {
 	struct nf_ct_event *item = ptr;
 #else
-static int sfe_cm_conntrack_event(unsigned int events, struct nf_ct_event *item)
+static int sfe_cm_conntrack_event(unsigned int events, const struct nf_ct_event *item)
 {
 #endif
 	struct sfe_connection_destroy sid;
@@ -810,7 +810,7 @@ static struct notifier_block sfe_cm_conntrack_notifier = {
 };
 #else
 static struct nf_ct_event_notifier sfe_cm_conntrack_notifier = {
-	.fcn = sfe_cm_conntrack_event,
+	.ct_event = sfe_cm_conntrack_event,
 };
 #endif
 
@@ -882,18 +882,22 @@ static int __init sfe_cm_init(void)
 
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 	result = nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
-#else
-	result = nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
-#endif
 	if (result < 0) {
 		pr_err("sfe_cm: failed to register conntrack notifier: %d\n", result);
 		goto exit_fail;
 	}
+#else
+	nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
+#endif
 
 	result = nf_register_net_hooks(&init_net, sfe_cm_ops_post_routing, ARRAY_SIZE(sfe_cm_ops_post_routing));
 	if (result < 0) {
 		pr_err("sfe_cm: failed to register post routing hooks: %d\n", result);
+#ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 		nf_conntrack_unregister_notifier(&init_net, &sfe_cm_conntrack_notifier);
+#else
+		nf_conntrack_unregister_notifier(&init_net);
+#endif
 		goto exit_fail;
 	}
 
@@ -919,7 +923,11 @@ static void __exit sfe_cm_exit(void)
 	pr_info("sfe_cm: unloading\n");
 
 	nf_unregister_net_hooks(&init_net, sfe_cm_ops_post_routing, ARRAY_SIZE(sfe_cm_ops_post_routing));
+#ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 	nf_conntrack_unregister_notifier(&init_net, &sfe_cm_conntrack_notifier);
+#else
+	nf_conntrack_unregister_notifier(&init_net);
+#endif
 
 	unregister_inet6addr_notifier(&sc->inet6_notifier);
 	unregister_inetaddr_notifier(&sc->inet_notifier);

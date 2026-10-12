@@ -14,7 +14,7 @@ index 8417eb2bdc..5ad81a4530 100644
 +++ b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
 @@ -111,25 +111,38 @@ return view.extend({
  			if (L.hasSystemFeature('shortcutfe')) {
- 				o.value('3', _("Shortcut-FE flow offloading"), _('Shortcut-FE based offloading for routing/NAT'));
+ 				o.value('3', _("Shortcut-FE v2 flow offloading"), _('Shortcut-FE v2 based offloading for routing/NAT'));
  			}
 +			if (L.hasSystemFeature('natflow')) {
 +				o.value('4', _("Natflow offloading"), _('Natflow based offloading for routing/NAT'));

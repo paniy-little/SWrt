@@ -25,21 +25,100 @@ index 03fb87c..5463759 100644
  endif
  
 -ccflags-y += -Werror -Wall -Iexports/
-+ccflags-y += -Wall -I$(src)/exports/ -I$(src) -include $(src)/sfe_compat.h
++ccflags-y += -Wall -Wno-missing-prototypes -Wno-error -I$(src)/exports/ -I$(src) -include $(src)/sfe_compat.h
 +
 diff --git a/sfe.c b/sfe.c
-index 66c6187..5d428cf 100644
+index 66c6187..f6a0ca3 100644
 --- a/sfe.c
 +++ b/sfe.c
-@@ -39,7 +39,7 @@
+@@ -39,7 +39,51 @@
  
  extern int max_ipv4_conn;
  extern int max_ipv6_conn;
 -extern bool fast_tc_filter;
 +bool fast_tc_filter = false;
++typedef int (*athrs_fast_nat_recv_fn_t)(struct sk_buff *skb);
++static athrs_fast_nat_recv_fn_t *sfe_fast_nat_recv_p;
++int sfe_recv(struct sk_buff *skb);
++
++static unsigned int sfe_ipv4_pre_routing_hook(void *priv,
++					      struct sk_buff *skb,
++					      const struct nf_hook_state *state)
++{
++	if (unlikely(!skb->dev))
++		skb->dev = state->in;
++	if (sfe_recv(skb))
++		return NF_STOLEN;
++	return NF_ACCEPT;
++}
++
++#if defined(SFE_SUPPORT_IPV6)
++static unsigned int sfe_ipv6_pre_routing_hook(void *priv,
++					      struct sk_buff *skb,
++					      const struct nf_hook_state *state)
++{
++	if (unlikely(!skb->dev))
++		skb->dev = state->in;
++	if (sfe_recv(skb))
++		return NF_STOLEN;
++	return NF_ACCEPT;
++}
++#endif
++
++static const struct nf_hook_ops sfe_prerouting_ops[] = {
++	{
++		.hook = sfe_ipv4_pre_routing_hook,
++		.pf = NFPROTO_IPV4,
++		.hooknum = NF_INET_PRE_ROUTING,
++		.priority = NF_IP_PRI_FIRST,
++	},
++#if defined(SFE_SUPPORT_IPV6)
++	{
++		.hook = sfe_ipv6_pre_routing_hook,
++		.pf = NFPROTO_IPV6,
++		.hooknum = NF_INET_PRE_ROUTING,
++		.priority = NF_IP6_PRI_FIRST,
++	},
++#endif
++};
  uint8_t sfe_fls_flush_on_hwm_enable;
  
  #define SFE_MESSAGE_VERSION 0x1
+@@ -2870,8 +2913,18 @@ int sfe_init_if(void)
+ 	/*
+ 	 * Hook the receive path in the network stack.
+ 	 */
+-	BUG_ON(athrs_fast_nat_recv);
+-	RCU_INIT_POINTER(athrs_fast_nat_recv, sfe_recv);
++	sfe_fast_nat_recv_p = (athrs_fast_nat_recv_fn_t *)__symbol_get("athrs_fast_nat_recv");
++	if (sfe_fast_nat_recv_p) {
++		RCU_INIT_POINTER(*sfe_fast_nat_recv_p, sfe_recv);
++		pr_info("sfe: kernel fast_nat_recv hook activated\n");
++	} else {
++		result = nf_register_net_hooks(&init_net, sfe_prerouting_ops, ARRAY_SIZE(sfe_prerouting_ops));
++		if (result) {
++			pr_err("sfe: failed to register netfilter hook: %d\n", result);
++			goto exit2;
++		}
++		pr_info("sfe: netfilter prerouting hook activated (generic kernel mode)\n");
++	}
+ 
+ 	return 0;
+ exit2:
+@@ -2890,6 +2943,12 @@ void sfe_exit_if(void)
+ 	/*
+ 	 * Unregister our receive callback.
+ 	 */
+-	RCU_INIT_POINTER(athrs_fast_nat_recv, NULL);
++	if (sfe_fast_nat_recv_p) {
++		RCU_INIT_POINTER(*sfe_fast_nat_recv_p, NULL);
++		symbol_put_addr(sfe_fast_nat_recv_p);
++		sfe_fast_nat_recv_p = NULL;
++	} else {
++		nf_unregister_net_hooks(&init_net, sfe_prerouting_ops, ARRAY_SIZE(sfe_prerouting_ops));
++	}
+ 
+ 	sfe_pppoe_mgr_exit();
 diff --git a/sfe_ipv4_tcp.c b/sfe_ipv4_tcp.c
 index 55769af..524cd9f 100644
 --- a/sfe_ipv4_tcp.c

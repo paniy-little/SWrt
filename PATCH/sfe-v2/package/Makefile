@@ -21,7 +21,7 @@ define KernelPackage/shortcut-fe
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
   TITLE:=Qualcomm Shortcut-FE v2 Engine
-  DEPENDS:=+kmod-nf-conntrack
+  DEPENDS:=@IPV6 +kmod-nf-conntrack
   FILES:=$(PKG_BUILD_DIR)/qca-nss-sfe.ko
   KCONFIG:= \
 	   CONFIG_NF_CONNTRACK_CHAIN_EVENTS=y \
@@ -30,7 +30,6 @@ define KernelPackage/shortcut-fe
 	   CONFIG_SHORTCUT_FE=y \
 	   CONFIG_XFRM=y
   PROVIDES:=kmod-shortcut-fe
-  AUTOLOAD:=$(call AutoLoad,50,qca-nss-sfe)
 endef
 
 define KernelPackage/shortcut-fe/description
@@ -41,6 +40,10 @@ endef
 define KernelPackage/shortcut-fe/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/shortcut-fe $(1)/etc/init.d/shortcut-fe
+	$(INSTALL_DIR) $(1)/usr/bin
+	$(INSTALL_BIN) ./files/usr/bin/sfe_dump $(1)/usr/bin/sfe_dump
+	$(INSTALL_DIR) $(1)/usr/share/ucitrack
+	$(INSTALL_DATA) ./files/usr/share/ucitrack/shortcut-fe.json $(1)/usr/share/ucitrack/shortcut-fe.json
 endef
 
 define KernelPackage/shortcut-fe-cm
@@ -48,14 +51,13 @@ define KernelPackage/shortcut-fe-cm
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
   TITLE:=Qualcomm Shortcut-FE v2 Connection Manager
-  DEPENDS:=+kmod-shortcut-fe +kmod-ipt-conntrack
+  DEPENDS:=+kmod-shortcut-fe
   FILES:=$(PKG_BUILD_DIR)/shortcut-fe-cm.ko
   KCONFIG:= \
 	   CONFIG_NF_CONNTRACK_CHAIN_EVENTS=y \
 	   CONFIG_NF_CONNTRACK_EVENTS=y \
 	   CONFIG_XFRM=y
   PROVIDES:=kmod-shortcut-fe-cm
-  AUTOLOAD:=$(call AutoLoad,51,shortcut-fe-cm)
 endef
 
 define KernelPackage/shortcut-fe-cm/description
