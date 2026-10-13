@@ -17,8 +17,9 @@
 
 #include <linux/version.h>
 #include <linux/module.h>
-#include <linux/sysfs.h>
+#include <linux/jiffies.h>
 #include <linux/skbuff.h>
+#include <linux/workqueue.h>
 #include <net/ip.h>
 #include <net/tcp.h>
 #include <net/udp.h>
@@ -38,6 +39,13 @@
 
 #include "sfe_cm.h"
 #include "exports/sfe_api.h"
+
+/*
+ * Exported by the SFE v2 engine through the generic compatibility patch; they
+ * are internal to the engine otherwise.
+ */
+extern void sfe_ipv4_destroy_all_rules_for_dev(struct net_device *dev);
+extern void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev);
 
 /*
  * Kernel compatibility shims
@@ -99,50 +107,61 @@ static inline void sfe_cm_add_acct(struct nf_conn *ct, int dir, u64 pkts, u64 by
 #endif
 }
 
-typedef enum {
-	SFE_CM_EXCEPTION_PACKET_BROADCAST,
-	SFE_CM_EXCEPTION_PACKET_MULTICAST,
-	SFE_CM_EXCEPTION_NO_IIF,
-	SFE_CM_EXCEPTION_NO_CT,
-	SFE_CM_EXCEPTION_CT_NO_TRACK,
-	SFE_CM_EXCEPTION_CT_NO_CONFIRM,
-	SFE_CM_EXCEPTION_CT_IS_ALG,
-	SFE_CM_EXCEPTION_IS_IPV4_MCAST,
-	SFE_CM_EXCEPTION_IS_IPV6_MCAST,
-	SFE_CM_EXCEPTION_TCP_NOT_ASSURED,
-	SFE_CM_EXCEPTION_TCP_NOT_ESTABLISHED,
-	SFE_CM_EXCEPTION_UNKNOW_PROTOCOL,
-	SFE_CM_EXCEPTION_NO_SRC_DEV,
-	SFE_CM_EXCEPTION_NO_SRC_XLATE_DEV,
-	SFE_CM_EXCEPTION_NO_DEST_DEV,
-	SFE_CM_EXCEPTION_NO_DEST_XLATE_DEV,
-	SFE_CM_EXCEPTION_NO_BRIDGE,
-	SFE_CM_EXCEPTION_LOCAL_OUT,
-	SFE_CM_EXCEPTION_MAX
-} sfe_cm_exception_t;
+/*
+ * Periodic connection synchronisation.
+ *
+ * SFE v2 never walks its connection table on its own: the connection manager
+ * asks for a batch and the engine answers asynchronously through the many-sync
+ * callback.  We have to drive that loop, because the fast path never touches
+ * conntrack:
+ *   1. every accelerated flow keeps its conntrack entry (and therefore its
+ *      timeout) alive instead of being kicked back to the slow path halfway
+ *      through,
+ *   2. the conntrack packet/byte counters stay meaningful for accounting.
+ *
+ * A round is (re)started every SFE_CM_SYNC_INTERVAL_MS.  Whenever the engine
+ * reports connections left to sync (many->next != 0) the next batch is queued
+ * SFE_CM_SYNC_CHAIN_DELAY jiffies later, so a full walk of even a maximum sized
+ * (4096 entries) table finishes in about a second at a fixed, tiny CPU cost.
+ */
+#define SFE_CM_SYNC_INTERVAL_MS	1000
+#define SFE_CM_SYNC_CHAIN_DELAY	1
+
+#ifdef SFE_SUPPORT_IPV6
+#define SFE_CM_SYNC_FAMILIES	2
+#else
+#define SFE_CM_SYNC_FAMILIES	1
+#endif
+
+/*
+ * One round driver per address family: a busy IPv4 table must not drag IPv6
+ * (or the other way round) through the same chain of wake-ups.
+ */
+struct sfe_cm_sync {
+	struct delayed_work dwork;
+	bool is_v4;
+};
 
 struct sfe_cm {
-	spinlock_t lock;
-	struct kobject *sys_sfe_cm;
 	struct notifier_block dev_notifier;
 	struct notifier_block inet_notifier;
 	struct notifier_block inet6_notifier;
-	u32 exceptions[SFE_CM_EXCEPTION_MAX];
 };
 
 static struct sfe_cm __sc;
+static struct sfe_cm_sync sfe_cm_sync[SFE_CM_SYNC_FAMILIES];
 static struct sfe_ctx_instance *sfe_v4_ctx;
 #ifdef SFE_SUPPORT_IPV6
 static struct sfe_ctx_instance *sfe_v6_ctx;
 #endif
 
-static inline void sfe_cm_incr_exceptions(sfe_cm_exception_t except)
-{
-	struct sfe_cm *sc = &__sc;
-	spin_lock_bh(&sc->lock);
-	sc->exceptions[except]++;
-	spin_unlock_bh(&sc->lock);
-}
+static void sfe_cm_sync_work(struct work_struct *work);
+
+/*
+ * Vanilla kernels have a single conntrack event notifier slot.  We take it over
+ * and re-claim it from the periodic work in case somebody registers later.
+ */
+static void sfe_cm_conntrack_notifier_reclaim(void);
 
 /*
  * SFE v2 API bridges
@@ -159,7 +178,30 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 			  sizeof(struct sfe_ipv4_rule_create_msg), NULL, NULL);
 
 	msg.msg.rule_create.valid_flags = SFE_RULE_CREATE_CONN_VALID;
-	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED;
+	/*
+	 * Ask the engine to try the qdisc-bypassing transmit path in both
+	 * directions.  The engine still validates every flow once (GSO, VLAN,
+	 * XFRM, socket validation) and silently falls back to dev_queue_xmit()
+	 * where the fast path is not usable.
+	 *
+	 * Trade-off, see README.md: traffic control (SQM/cake shaping, egress
+	 * filters, qdisc statistics) is bypassed for accelerated flows.
+	 */
+	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED |
+					 SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST |
+					 SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+
+	/*
+	 * A PPPoE side consists of two devices: the bottom one (the real
+	 * ingress/egress device SFE decapsulates from / encapsulates into) and
+	 * the top one (the pppoe-wan netdev).  Tell the engine which sides have
+	 * to be matched and transmitted on the bottom interface.
+	 */
+	if (sic->flow_is_pppoe)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE;
+
+	if (sic->return_is_pppoe)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE;
 
 	msg.msg.rule_create.tuple.protocol = sic->protocol;
 	msg.msg.rule_create.tuple.flow_ip = sic->src_ip.ip;
@@ -257,7 +299,17 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 			  sizeof(struct sfe_ipv6_rule_create_msg), NULL, NULL);
 
 	msg.msg.rule_create.valid_flags = SFE_RULE_CREATE_CONN_VALID;
-	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED;
+	/* See sfe_cm_v2_ipv4_create_rule() for the fast transmit trade-off. */
+	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED |
+					 SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST |
+					 SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+
+	/* See sfe_cm_v2_ipv4_create_rule() for the bottom interface rule. */
+	if (sic->flow_is_pppoe)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE;
+
+	if (sic->return_is_pppoe)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE;
 
 	msg.msg.rule_create.tuple.protocol = sic->protocol;
 	memcpy(msg.msg.rule_create.tuple.flow_ip, sic->src_ip.ip6[0].addr, sizeof(struct sfe_ipv6_addr));
@@ -385,7 +437,25 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 				for (i = 0; i < stack.num_paths; i++) {
 					struct net_device_path *path = &stack.path[i];
 					if (path->type == DEV_PATH_PPPOE && path->dev) {
-						mac_dev = (struct net_device *)path->dev;
+						struct net_device *pppoe_dev = (struct net_device *)path->dev;
+
+						/*
+						 * This hop describes the PPPoE netdev the stack
+						 * routes through (pppoe-wan); the device the
+						 * encapsulated frame has to leave through is the
+						 * bottom device of the stack (eth0/eth0.x), which
+						 * dev_fill_forward_path() appends as the last hop.
+						 *
+						 * SFE writes the L2 and PPPoE headers itself, so the
+						 * bottom device has to be its interface - handing an
+						 * encapsulated frame to the PPPoE netdev would make
+						 * the ppp channel encapsulate it a second time.  The
+						 * PPPoE netdev is passed along as the top interface.
+						 */
+						mac_dev = (struct net_device *)stack.path[stack.num_paths - 1].dev;
+						if (unlikely(!mac_dev))
+							mac_dev = pppoe_dev;
+
 						if (is_pppoe) {
 							*is_pppoe = true;
 							if (pppoe_sid)
@@ -393,8 +463,8 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 							if (pppoe_mac)
 								memcpy(pppoe_mac, path->encap.h_dest, ETH_ALEN);
 							if (top_dev) {
-								dev_hold(dst->dev);
-								*top_dev = dst->dev;
+								dev_hold(pppoe_dev);
+								*top_dev = pppoe_dev;
 							}
 						}
 						memcpy(mac_addr, path->encap.h_dest, ETH_ALEN);
@@ -510,10 +580,21 @@ static void sfe_cm_v2_ipv4_sync_many_callback(void *app_data, struct sfe_ipv4_ms
 		sis.dest_new_packet_count = s->return_rx_packet_count;
 		sis.dest_new_byte_count = s->return_rx_byte_count;
 		sis.reason = s->reason;
-		sis.delta_jiffies = s->inc_ticks;
+		/*
+		 * The engine reports the elapsed time in milliseconds; conntrack
+		 * timeouts are in jiffies.
+		 */
+		sis.delta_jiffies = msecs_to_jiffies(s->inc_ticks);
 
 		sfe_cm_sync_rule(&sis);
 	}
+
+	/*
+	 * Connections are left: keep the walk of this family going instead of
+	 * waiting for the next round.
+	 */
+	if (many->next)
+		mod_delayed_work(system_wq, &sfe_cm_sync[0].dwork, SFE_CM_SYNC_CHAIN_DELAY);
 }
 
 #ifdef SFE_SUPPORT_IPV6
@@ -542,12 +623,76 @@ static void sfe_cm_v2_ipv6_sync_many_callback(void *app_data, struct sfe_ipv6_ms
 		sis.dest_new_packet_count = s->return_rx_packet_count;
 		sis.dest_new_byte_count = s->return_rx_byte_count;
 		sis.reason = s->reason;
-		sis.delta_jiffies = s->inc_ticks;
+		/* The engine reports the elapsed time in milliseconds. */
+		sis.delta_jiffies = msecs_to_jiffies(s->inc_ticks);
 
 		sfe_cm_sync_rule(&sis);
 	}
+
+	if (many->next)
+		mod_delayed_work(system_wq, &sfe_cm_sync[1].dwork, SFE_CM_SYNC_CHAIN_DELAY);
 }
 #endif
+
+/*
+ * sfe_cm_sync_request()
+ *	Ask the engine for one batch of connection statistics.
+ *
+ * The engine answers through sfe_cm_v2_ipvX_sync_many_callback(), which runs in
+ * workqueue context, so this is a cheap hand-off and not a walk of our own.
+ */
+static void sfe_cm_sync_request(bool is_v4)
+{
+	if (is_v4) {
+		struct sfe_ipv4_msg msg;
+
+		if (unlikely(!sfe_v4_ctx))
+			return;
+
+		memset(&msg, 0, sizeof(msg));
+		sfe_ipv4_msg_init(&msg, 0, SFE_TX_CONN_STATS_SYNC_MANY_MSG,
+				  sizeof(struct sfe_ipv4_conn_sync_many_msg), NULL, NULL);
+		sfe_ipv4_tx(sfe_v4_ctx, &msg);
+		return;
+	}
+
+#ifdef SFE_SUPPORT_IPV6
+	{
+		struct sfe_ipv6_msg msg;
+
+		if (unlikely(!sfe_v6_ctx))
+			return;
+
+		memset(&msg, 0, sizeof(msg));
+		sfe_ipv6_msg_init(&msg, 0, SFE_TX_CONN_STATS_SYNC_MANY_MSG,
+				  sizeof(struct sfe_ipv6_conn_sync_many_msg), NULL, NULL);
+		sfe_ipv6_tx(sfe_v6_ctx, &msg);
+	}
+#endif
+}
+
+/*
+ * sfe_cm_sync_work()
+ *	Round driver for the connection synchronisation of one address family.
+ */
+static void sfe_cm_sync_work(struct work_struct *work)
+{
+	struct sfe_cm_sync *sync = container_of(work, struct sfe_cm_sync, dwork.work);
+
+	/*
+	 * Make sure we still own the conntrack event notifier (vanilla kernels
+	 * only, a no-op otherwise).
+	 */
+	sfe_cm_conntrack_notifier_reclaim();
+
+	sfe_cm_sync_request(sync->is_v4);
+
+	/*
+	 * Batches that report work left re-queue this work earlier; this is only
+	 * the "start a new round" and lost-response safety net.
+	 */
+	schedule_delayed_work(&sync->dwork, msecs_to_jiffies(SFE_CM_SYNC_INTERVAL_MS));
+}
 
 /*
  * Post-routing packet inspection and rule creation
@@ -754,24 +899,30 @@ static unsigned int sfe_cm_ipv6_post_routing_hook(unsigned int hooknum, struct s
 
 /*
  * Conntrack destroy event monitoring
+ *
+ * The engine only hands a rule back when its conntrack entry dies, so this is
+ * the normal way accelerated flows are torn down.
+ *
+ * Kernels built with the QCA chain-events support (CONFIG_NF_CONNTRACK_CHAIN_EVENTS,
+ * from the multi-registrant patch) give every user its own notifier.  Vanilla
+ * kernels expose a single global slot instead: we take it over, forward the
+ * events we consume to its previous owner (in practice ctnetlink) so that both
+ * keep working, and re-claim it from the periodic work in case somebody
+ * registers after us.
  */
-#ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
-static int sfe_cm_conntrack_event(struct notifier_block *this, unsigned long events, void *ptr)
+static void sfe_cm_conntrack_destroy(unsigned int events, const struct nf_ct_event *item)
 {
-	struct nf_ct_event *item = ptr;
-#else
-static int sfe_cm_conntrack_event(unsigned int events, const struct nf_ct_event *item)
-{
-#endif
 	struct sfe_connection_destroy sid;
-	struct nf_conn *ct = item->ct;
+	struct nf_conn *ct;
 	struct nf_conntrack_tuple orig_tuple;
 
-	if (unlikely(!ct))
-		return NOTIFY_DONE;
-
 	if (unlikely(!(events & (1 << IPCT_DESTROY))))
-		return NOTIFY_DONE;
+		return;
+
+	if (unlikely(!item || !item->ct))
+		return;
+
+	ct = item->ct;
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 	sid.protocol = orig_tuple.dst.protonum;
@@ -786,7 +937,7 @@ static int sfe_cm_conntrack_event(unsigned int events, const struct nf_ct_event 
 		sid.dest_port = orig_tuple.dst.u.udp.port;
 		break;
 	default:
-		return NOTIFY_DONE;
+		return;
 	}
 
 	if (likely(nf_ct_l3num(ct) == AF_INET)) {
@@ -800,18 +951,102 @@ static int sfe_cm_conntrack_event(unsigned int events, const struct nf_ct_event 
 		sfe_cm_v2_ipv6_destroy_rule(&sid);
 #endif
 	}
-
-	return NOTIFY_DONE;
 }
 
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+static int sfe_cm_conntrack_event(struct notifier_block *this, unsigned long events, void *ptr)
+{
+	sfe_cm_conntrack_destroy((unsigned int)events, ptr);
+	return NOTIFY_DONE;
+}
+
 static struct notifier_block sfe_cm_conntrack_notifier = {
 	.notifier_call = sfe_cm_conntrack_event,
 };
+
+static void sfe_cm_conntrack_notifier_reclaim(void)
+{
+}
 #else
+static const struct nf_ct_event_notifier __rcu *sfe_cm_prev_notifier;
+static struct nf_ct_event_notifier sfe_cm_conntrack_notifier;
+
+static int sfe_cm_ct_event(unsigned int events, const struct nf_ct_event *item)
+{
+	const struct nf_ct_event_notifier *prev;
+	int ret = 0;
+
+	sfe_cm_conntrack_destroy(events, item);
+
+	/* Keep the previous owner of the slot (ctnetlink) functional. */
+	rcu_read_lock();
+	prev = rcu_dereference(sfe_cm_prev_notifier);
+	if (prev && prev != &sfe_cm_conntrack_notifier && prev->ct_event)
+		ret = prev->ct_event(events, item);
+	rcu_read_unlock();
+
+	return ret;
+}
+
+static int sfe_cm_exp_event(unsigned int events, const struct nf_exp_event *item)
+{
+	const struct nf_ct_event_notifier *prev;
+	int ret = 0;
+
+	rcu_read_lock();
+	prev = rcu_dereference(sfe_cm_prev_notifier);
+	if (prev && prev->exp_event)
+		ret = prev->exp_event(events, item);
+	rcu_read_unlock();
+
+	return ret;
+}
+
 static struct nf_ct_event_notifier sfe_cm_conntrack_notifier = {
-	.ct_event = sfe_cm_conntrack_event,
+	.ct_event = sfe_cm_ct_event,
+	.exp_event = sfe_cm_exp_event,
 };
+
+/*
+ * sfe_cm_conntrack_notifier_reclaim()
+ *	Own the (single) conntrack event notifier slot.
+ *
+ * Clearing the slot before taking it keeps the kernel from warning about
+ * overwriting a live registration; the previous owner is remembered so that its
+ * events can be forwarded.
+ */
+static void sfe_cm_conntrack_notifier_reclaim(void)
+{
+	const struct nf_ct_event_notifier *cur;
+
+	cur = rcu_access_pointer(init_net.ct.nf_conntrack_event_cb);
+	if (cur == &sfe_cm_conntrack_notifier)
+		return;
+
+	rcu_assign_pointer(sfe_cm_prev_notifier, cur);
+	nf_conntrack_unregister_notifier(&init_net);
+	nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
+}
+
+/*
+ * sfe_cm_conntrack_notifier_release()
+ *	Hand the notifier slot back to its previous owner.
+ */
+static void sfe_cm_conntrack_notifier_release(void)
+{
+	const struct nf_ct_event_notifier *prev;
+
+	if (rcu_access_pointer(init_net.ct.nf_conntrack_event_cb) != &sfe_cm_conntrack_notifier)
+		return;
+
+	rcu_read_lock();
+	prev = rcu_dereference(sfe_cm_prev_notifier);
+	rcu_read_unlock();
+
+	nf_conntrack_unregister_notifier(&init_net);
+	if (prev)
+		nf_conntrack_register_notifier(&init_net, prev);
+}
 #endif
 
 static struct nf_hook_ops sfe_cm_ops_post_routing[] __read_mostly = {
@@ -831,18 +1066,67 @@ static struct nf_hook_ops sfe_cm_ops_post_routing[] __read_mostly = {
 #endif
 };
 
+/*
+ * sfe_cm_flush_dev()
+ *	Drop every accelerated flow that uses a device.
+ *
+ * An accelerated rule caches the device, its MAC and (for PPPoE) the session ID
+ * and peer MAC, so it must not outlive the device it was built on: after a WAN
+ * flap it would keep encapsulating with stale information.  The engine holds
+ * device references, so the pointers stay valid but useless - it has to be told
+ * explicitly.
+ */
+static void sfe_cm_flush_dev(struct net_device *dev)
+{
+	if (unlikely(!dev))
+		return;
+
+	sfe_ipv4_destroy_all_rules_for_dev(dev);
+
+#ifdef SFE_SUPPORT_IPV6
+	sfe_ipv6_destroy_all_rules_for_dev(dev);
+#endif
+}
+
 static int sfe_cm_device_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
+	struct net_device *dev = SFE_DEV_EVENT_PTR(ptr);
+
+	/*
+	 * Rules cache the device, its MAC and the device features captured when the
+	 * rule was built, so any change of those has to drop them: DOWN/UNREGISTER
+	 * for the device going away, CHANGEADDR for its MAC, FEAT_CHANGE/CHANGEMTU
+	 * for the transmit path changing underneath the cached features.
+	 */
+	if (dev && (event == NETDEV_DOWN || event == NETDEV_UNREGISTER ||
+		    event == NETDEV_CHANGEADDR || event == NETDEV_FEAT_CHANGE ||
+		    event == NETDEV_CHANGEMTU))
+		sfe_cm_flush_dev(dev);
+
 	return NOTIFY_DONE;
 }
 
 static int sfe_cm_inet_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
+	struct in_ifaddr *ifa = ptr;
+
+	/*
+	 * Address notifiers report NETDEV_DOWN when an address is removed, and
+	 * always carry the in_ifaddr that is going away.
+	 */
+	if (ifa && ifa->ifa_dev && (event == NETDEV_DOWN))
+		sfe_cm_flush_dev(ifa->ifa_dev->dev);
+
 	return NOTIFY_DONE;
 }
 
 static int sfe_cm_inet6_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
+	struct inet6_ifaddr *ifa = ptr;
+
+	if (ifa && ifa->idev && (event == NETDEV_DOWN))
+		sfe_cm_flush_dev(ifa->idev->dev);
+
 	return NOTIFY_DONE;
 }
 
@@ -853,7 +1137,13 @@ static int __init sfe_cm_init(void)
 
 	pr_info("sfe_cm: Qualcomm Shortcut-FE v2 Connection Manager loading\n");
 
-	spin_lock_init(&sc->lock);
+	sfe_cm_sync[0].is_v4 = true;
+	INIT_DELAYED_WORK(&sfe_cm_sync[0].dwork, sfe_cm_sync_work);
+
+#ifdef SFE_SUPPORT_IPV6
+	sfe_cm_sync[1].is_v4 = false;
+	INIT_DELAYED_WORK(&sfe_cm_sync[1].dwork, sfe_cm_sync_work);
+#endif
 
 	sfe_v4_ctx = sfe_ipv4_notify_register(NULL, sfe_cm_v2_ipv4_sync_many_callback, NULL);
 	if (!sfe_v4_ctx) {
@@ -887,7 +1177,7 @@ static int __init sfe_cm_init(void)
 		goto exit_fail;
 	}
 #else
-	nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
+	sfe_cm_conntrack_notifier_reclaim();
 #endif
 
 	result = nf_register_net_hooks(&init_net, sfe_cm_ops_post_routing, ARRAY_SIZE(sfe_cm_ops_post_routing));
@@ -896,10 +1186,16 @@ static int __init sfe_cm_init(void)
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 		nf_conntrack_unregister_notifier(&init_net, &sfe_cm_conntrack_notifier);
 #else
-		nf_conntrack_unregister_notifier(&init_net);
+		sfe_cm_conntrack_notifier_release();
 #endif
 		goto exit_fail;
 	}
+
+	schedule_delayed_work(&sfe_cm_sync[0].dwork, msecs_to_jiffies(SFE_CM_SYNC_INTERVAL_MS));
+
+#ifdef SFE_SUPPORT_IPV6
+	schedule_delayed_work(&sfe_cm_sync[1].dwork, msecs_to_jiffies(SFE_CM_SYNC_INTERVAL_MS));
+#endif
 
 	pr_info("sfe_cm: SFE v2 Connection Manager successfully initialized\n");
 	return 0;
@@ -922,11 +1218,17 @@ static void __exit sfe_cm_exit(void)
 
 	pr_info("sfe_cm: unloading\n");
 
+	cancel_delayed_work_sync(&sfe_cm_sync[0].dwork);
+
+#ifdef SFE_SUPPORT_IPV6
+	cancel_delayed_work_sync(&sfe_cm_sync[1].dwork);
+#endif
+
 	nf_unregister_net_hooks(&init_net, sfe_cm_ops_post_routing, ARRAY_SIZE(sfe_cm_ops_post_routing));
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 	nf_conntrack_unregister_notifier(&init_net, &sfe_cm_conntrack_notifier);
 #else
-	nf_conntrack_unregister_notifier(&init_net);
+	sfe_cm_conntrack_notifier_release();
 #endif
 
 	unregister_inet6addr_notifier(&sc->inet6_notifier);
@@ -938,6 +1240,8 @@ static void __exit sfe_cm_exit(void)
 	if (sfe_v6_ctx)
 		sfe_ipv6_notify_unregister();
 #endif
+
+	synchronize_rcu();
 }
 
 module_init(sfe_cm_init);

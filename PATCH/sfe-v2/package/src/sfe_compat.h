@@ -33,8 +33,13 @@
 /* Debug memory tracing stub */
 #define mem_debug_update_skb(skb) do {} while (0)
 
-/* fast_forwarded stub for unpatched kernels */
-#ifndef fast_forwarded
+/*
+ * Kernels carrying the QCA short-circuit patch (CONFIG_SHORTCUT_FE) have a real
+ * fast_forwarded flag bit in struct sk_buff which the transmit path uses to keep
+ * fast-forwarded packets away from the net taps.  Without that bit the same flag
+ * is kept in the skb control buffer, which the fast path owns end to end.
+ */
+#if !defined(CONFIG_SHORTCUT_FE)
 #define fast_forwarded cb[47]
 #endif
 
@@ -131,6 +136,26 @@ static inline bool dev_fast_xmit(struct sk_buff *skb,
 	if (unlikely(!(dev->flags & IFF_UP)))
 		return false;
 
+	/*
+	 * This path skips validate_xmit_skb(), and the flow level check in
+	 * sfe_fast_xmit_check() runs only on the first packet of a direction, so
+	 * the per packet cases it covers have to be rejected here.  Every test is
+	 * a single field of an already hot skb.
+	 */
+	if (unlikely(skb_vlan_tag_present(skb)))
+		return false;
+
+	if (unlikely(skb_sec_path(skb)))
+		return false;
+
+#ifdef CONFIG_SOCK_VALIDATE_XMIT
+	if (unlikely(skb->sk && sk_fullsock(skb->sk) && skb->sk->sk_validate_xmit_skb))
+		return false;
+#endif
+
+	if (unlikely(netif_needs_gso(skb, features)))
+		return false;
+
 	if (unlikely(skb_needs_linearize(skb, features)))
 		return false;
 
@@ -150,6 +175,7 @@ static inline bool dev_fast_xmit(struct sk_buff *skb,
 	if (likely(txq->xmit_lock_owner != cpu)) {
 		HARD_TX_LOCK(dev, txq, cpu);
 		if (likely(!netif_xmit_stopped(txq))) {
+			skb->dev = dev;
 			rc = netdev_start_xmit(skb, dev, txq, 0);
 			if (unlikely(!dev_xmit_complete(rc))) {
 				HARD_TX_UNLOCK(dev, txq);
