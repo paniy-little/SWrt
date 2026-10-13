@@ -4,15 +4,10 @@
 
 不依赖 NSS、PPE 或任何高通专用硬件芯片，在原生内核上即可作为外部模块运行。
 
-内核增强（`netif_receive` 入口钩子、PPPoE 下行卸载、多注册者 conntrack 事件）由 `PATCH/kernel/sfe/952`、`953` 提供，勾选本包即生效，不需要改内核配置：
-
-* `952` 定义 `CONFIG_NF_CONNTRACK_CHAIN_EVENTS`，`953` 定义 `CONFIG_SHORTCUT_FE`（入口钩子、skb 快转标记位、`br_dev_update_stats`）。两份必须成对，`953` 对 `nf_conntrack_ecache.c` 的改动依赖 `952` 先落地。
-* 包的 `KCONFIG` 以 `符号=值` 形式列出这两个符号。构建时 `Kernel/Configure` 通过 `package-metadata.pl kconfig` 把已选包的这些条目写入 `.config.override`，再由 `kconfig.pl` 并入内核 `.config`，所以选中 `kmod-shortcut-fe-cm`（自动带上 `kmod-shortcut-fe`）就够了。
-* `符号=值` 表示"请打开"，裸符号 `CONFIG_FOO` 表示"检查已打开"（`include/kernel.mk` 的门禁），不要混用。
-* 补丁会改动 `struct sk_buff`，开关需要内核与全部模块一起重编。
-* SDK 构建例外：内核预编译、`.config` 冻结，`Kernel/Configure` 不重跑，用 SDK 编出来的模块走的是原生内核路径。
-
-运行期二选一：有 `athrs_fast_nat_recv` 就走 `netif_receive` 钩子，没有则回退 Netfilter，`dmesg | grep "sfe:"` 可以看到当前走哪条。
+可选内核补丁（`PATCH/kernel/sfe/`）提供进一步性能增强：
+* `952`（`CONFIG_NF_CONNTRACK_CHAIN_EVENTS`）：支持多注册者的 conntrack 事件链通知。
+* `953`（`CONFIG_SHORTCUT_FE`）：提供 L2 `netif_receive` 入口钩子、skb 快速转发标记位及网桥统计更新。
+在 OpenWrt 源码树中选中 `kmod-shortcut-fe-cm` 会自动通过包级 `KCONFIG` 启用上述配置。若在未打补丁的通用内核或独立 SDK 中编译，模块会自动回退至 Netfilter `PREROUTING` 钩子运行。
 
 ---
 
@@ -42,76 +37,126 @@ PATCH/sfe-v2/
 
 原版 QSDK SFE 针对高通私有内核及 NSS 硬件设计，移植到通用内核只需解决通用兼容与控制面挂接。
 
-### 2.1 单一补丁（`001-openwrt-generic-compat.patch`）
-* **Makefile**：
-  * 去除 `-Werror`，去除依赖私有内核导出的 `sfe_pppoe_mgr.o`；
-  * 添加 `shortcut-fe-cm.o` 一同编译；
-  * 编译参数加入 `-include $(src)/sfe_compat.h`。通过预包含头文件与 `-I$(src)`，Linux 6.11+ 的 `asm/unaligned.h` 移除及内核函数签名变更全部在垫片中处理，上游业务代码零修改。
+### 2.1 兼容补丁（`001-openwrt-generic-compat.patch`）
+* **构建系统（Makefile）**：
+  * 去除 `-Werror`，去除对私有 `sfe_pppoe_mgr.o` 的依赖；
+  * 集成 `shortcut-fe-cm.o` 联合构建；
+  * 引入 `-include $(src)/sfe_compat.h`，跨内核版本兼容垫片统一收敛于头文件处理。
 * **双模 Ingress 接收钩子**：
-  * 在 `sfe.c` 初始化时动态探测 `athrs_fast_nat_recv`。若内核有相关补丁则挂接函数指针获得极致性能；若为通用内核，则自动回退至 Netfilter `NF_INET_PRE_ROUTING`（优先级 `NF_IP_PRI_FIRST` / `NF_IP6_PRI_FIRST`），做到全平台通用且开箱即用，卸载时用 `__symbol_put` 归还符号引用。
+  * 初始化时动态探测 `athrs_fast_nat_recv`。命中 953 补丁则在 L2 `netif_receive` 阶段接管数据包；未打补丁时自动回退至 Netfilter `NF_INET_PRE_ROUTING`（`NF_IP_PRI_FIRST` / `NF_IP6_PRI_FIRST`）。
 * **数据面（sfe_ipv4_*.c / sfe_ipv6_*.c）**：
-  * 彻底剔除访问 PPE 硬件虚表（`xmit_dev->offload_ops`）的私有代码，纯软直发。
-* **导出按设备清理接口**：
-  * `sfe_ipv4_destroy_all_rules_for_dev()` / `sfe_ipv6_destroy_all_rules_for_dev()` 由引擎内部函数改为导出，供 `shortcut-fe-cm.ko` 调用；
-  * 匹配范围从 `original_dev`/`reply_dev` 扩到两个方向的 `top_interface_dev`，否则 PPPoE 与 bridge 场景在设备下线时清不掉规则。
-* **PPPoE 的 top/bottom 设备**：
-  * `dev_fill_forward_path()` 的 `DEV_PATH_PPPOE` 那一跳给的是 `pppoe-wan`，物理出口是紧随其后的 `DEV_PATH_ETHERNET` 跳（`eth0`/`eth0.x`）。连接管理器取物理设备作接口、`pppoe-wan` 记作 top，并置 `SFE_RULE_CREATE_FLAG_USE_FLOW/RETURN_BOTTOM_INTERFACE`；把 `pppoe-wan` 当接口会让 ppp 再封装一次。
+  * 移除 PPE 硬件虚表（`xmit_dev->offload_ops`）调用，转为软件直发。
+* **规则管理接口导出**：
+  * 导出 `sfe_ipv4_destroy_all_rules_for_dev()` / `sfe_ipv6_destroy_all_rules_for_dev()` 供连接管理器调用；
+  * 规则匹配范围扩展至双向 `top_interface_dev`，保证 PPPoE 与 bridge 等虚拟接口注销时能够完整清理规则。
+* **PPPoE 设备分层识别**：
+  * 连接管理器通过 `dev_fill_forward_path()` 识别底层物理网卡与顶层虚拟接口（`pppoe-wan`），并设置 `SFE_RULE_CREATE_FLAG_USE_FLOW/RETURN_BOTTOM_INTERFACE`。
 
-### 2.2 模块内联 `dev_fast_xmit`（免内核补丁直通网卡）
-`create-rule` 对两个方向都置 `SFE_RULE_CREATE_FLAG_FLOW/RETURN_TRANSMIT_FAST`，实现放在 `sfe_compat.h`：
-* 直接锁网卡 TX 队列并调用 `netdev_start_xmit()`，绕过 Linux qdisc 调度层；
-* TX 队列繁忙或停止时返回 `false`，回退 `dev_queue_xmit()`；
-* 引擎在建流时校验一次可行性（GSO/VLAN/XFRM/socket validate），不通过则该方向不再走快路径；垫片在每包上补做 `validate_xmit_skb()` 会处理的那几项判断，避免流内状态变化被漏过。
+### 2.2 出向路径与 SQM / TC 动态自适应（`fast_xmit`）
+SFE 默认通过 `SFE_RULE_CREATE_FLAG_FLOW/RETURN_TRANSMIT_FAST` 绕过内核 Qdisc 队列调度层，直接调用网卡驱动 `ndo_start_xmit()` 发送，可显著提高转发吞吐并降低延迟。为兼容 SQM 流控与 TC 规则，当前版本实现动态自适应检测：
 
-代价：加速流绕过 qdisc，SQM/cake 整形、`tc` egress 过滤与 qdisc 统计对它们不生效，未加速的流不受影响。
+* **默认 Qdisc 白名单**：
+  仅对无流控限制的队列直接直发：
+  * 内核内置 FIFO 与免排队队列（`noqueue`、`noop`、`pfifo`、`pfifo_fast`）；
+  * 多队列容器 `mq`（递归检查各子队列）；
+  * 系统默认分配的根队列（由 `net.core.default_qdisc` 指定，如单队列网卡默认的 `fq_codel`）。
+  显式配置的流控队列（如 `cake`、`htb`、`tbf`、`hfsc` 等）视为受控队列，不予绕过。
+* **TC 过滤器感知**：检测网卡是否存在 TC egress/ingress 或 `clsact` Qdisc，存在控制程序时自动禁用直发。
+* **双向独立决策**：分别评估入向与出向设备。若 WAN 口配置 SQM，上行流量清除 `TRANSMIT_FAST` 回退至内核 `dev_queue_xmit()` 正常排队；LAN 口无流控时，下行流量仍保持直发驱动。
+* **PPPoE 虚拟接口流控兼容（`pppoe_top_xmit`）**：
+  当顶层接口（`pppoe-wan`）存在流控时：
+  * `pppoe_top_xmit=1`（默认）：改由顶层接口发包。SFE 仅加速 IP 转发，PPPoE 报头封装与排队调度交由内核 PPP 驱动处理，兼顾转发性能与流量控制；
+  * `pppoe_top_xmit=0`：对该类连接不予加速，交由内核协议栈标准转发。
+* **运行时状态追踪与平滑降级**：
+  * 发包路径在 RCU 读临界区内实时检查流控状态，若网卡新增流控即时降级为 `dev_queue_xmit()`；
+  * 后台任务定期扫描设备状态，对新增流控的设备主动调用 `sfe_destroy_all_rules_for_dev()` 清理规则，使存量连接平滑回退至内核协议栈。
+* **全局开关**：设置模块参数 `fast_xmit=0` 可全局强制统一走 `dev_queue_xmit()`。
 
-### 2.3 连接同步与 conntrack 续期
-快速路径不经过 conntrack，计数与超时需要连接管理器定期补。引擎不带周期性遍历，批量同步由 CM 主动发起（`SFE_TX_CONN_STATS_SYNC_MANY_MSG`），`sfe_cm.c` 里每个协议族各有一个 delayed work：
-* 每 1000 ms 起一轮，兼作丢响应的兜底；
-* 引擎回报 `many->next != 0` 时，1 jiffy 后续跑下一批，批间让出一次调度；
-* 同步时把 `ct->timeout` 续期并累计 `nf_conntrack_acct`，加速流不因 conntrack GC 掉出快路径，流量统计也才有数；
-* `inc_ticks` 是毫秒，`ct->timeout` 是 jiffies，换算用 `msecs_to_jiffies()`。
+### 2.3 前置包延迟卸载机制（`delay_pkts`）
+控制面支持 `delay_pkts` 模块参数（默认 8），对连接前期的 N 个数据包保持在内核协议栈转发，达到阈值后再建立 SFE 加速规则：
+* **过滤短连接**：单次 DNS 查询、NTP 授时及瞬态探测连接因累计包数未达阈值，直接由内核网络栈处理并结束，避免频繁分配与销毁加速表项，降低哈希表抖动。
+* **分流与代理兼容**：为应用层协议识别（如 SNI）及连接重定向（TPROXY / REDIRECT）预留决策窗口。被重定向的连接脱离转发链，直连连接在完成握手与识别后转入快路径接管。
+* **Conntrack 计账联动**：
+  * 延迟卸载依赖 `nf_conn_acct` 扩展计数器。当 `delay_pkts > 0` 时，模块自动开启 `net.netfilter.nf_conntrack_acct`，并在模块卸载时恢复原值；若设为 0 则不启用计账。
+  * 可通过 UCI `firewall.@defaults[0].sfe_delay_pkts` 或 `/sys/module/shortcut_fe_cm/parameters/delay_pkts` 动态调整。
 
-引擎每批约 36 条，最大连接数 4096，一轮全表约 1~2 秒，后台开销可忽略。
+### 2.4 连接同步与 conntrack 续期
+SFE 快速路径转发绕过 Netfilter，连接管理器通过周期性工作队列（每 1000 ms）向引擎发起批量统计同步请求（`SFE_TX_CONN_STATS_SYNC_MANY_MSG`）：
+* 将引擎回传的时钟增量 `inc_ticks` 转换为 jiffies 刷新 `ct->timeout`，防止活跃加速流因 conntrack 超时被回收；
+* 同步累计数据包与字节数至 `nf_conn_acct`，保持系统的流量统计准确；
+* 采用分批让出调度机制（每批 36~64 条），避免大连接数同步时长时间占用 CPU。
 
-### 2.4 设备失效清理
-`NETDEV_DOWN`、`NETDEV_UNREGISTER`、`NETDEV_CHANGEADDR`、`NETDEV_FEAT_CHANGE` 以及地址删除（inet/inet6 notifier 的 `NETDEV_DOWN`）都会按设备清理规则。规则里缓存了设备、MAC、PPPoE 会话号和建流时的网卡特性，设备状态一变这些信息就不能再用。
+### 2.5 设备状态与事件清理
+连接管理器监听网络设备事件（`NETDEV_DOWN`、`NETDEV_UNREGISTER`、`NETDEV_CHANGEADDR`、`NETDEV_FEAT_CHANGE`）以及 IP 地址变更，当网卡下线、MAC 变动或配置调整时，主动销毁关联的 SFE 规则。
 
-### 2.5 conntrack 事件
-* 内核带 `952`（`CONFIG_NF_CONNTRACK_CHAIN_EVENTS`）时注册到 notifier chain，多注册者互不干扰。
-* 原生内核只有单槽：`sfe_cm.c` 接管槽位，并把事件转发给原持有者（通常是 ctnetlink），每轮同步 reclaim 一次，卸载时归还。`exp_event` 要一起接管，内核调用它时不判空。
+### 2.6 Conntrack 事件接入
+* 打入 952 补丁（`CONFIG_NF_CONNTRACK_CHAIN_EVENTS`）的内核中，注册至通知链，与其他注册者互不干扰。
+* 原生未打补丁内核中，连接管理器接管单一事件回调槽位并将事件向原持有者（如 ctnetlink）链式传递，卸载时安全归还。
 
-### 2.6 语义边界
-* 加速流不再经过 netfilter：建连期生效的规则（SYN、MSS clamp、ALG、NAT 判定）照常，按包生效的规则（计数器、`limit`、`log`、改 mark/dscp、每包 redirect）不生效。
-* egress qdisc 对加速流同样不生效（见 2.2）。
-* CM 不记录"是否已加速"，未被快路径吃掉的包会再请求一次规则；引擎在建规则入口先查重，命中只更新 TCP 窗口状态并返回 `SFE_RET_CONN_ALREADY_EXISTS`。
-* 只处理 `init_net` 与默认 conntrack zone；规则表上限 4096/族，超限后退回慢路径。
+### 2.7 数据面与语义边界
+* **TC / eBPF Ingress 兼容**：
+  若网卡挂载了 TC Ingress 程序（`tcx_ingress` / `miniq_ingress`），`sfe_recv` 主动返回 0 放行至内核执行 BPF 逻辑；未被 BPF 重定向的直连流量在后续 Netfilter `PREROUTING` 钩子中仍可被 SFE 捕获加速。
+* **L2 目的 MAC 与 NAT 映射**：
+  引擎仅重写双向目的 MAC 地址（出向 `conn_rule.return_mac`，入向 `conn_rule.flow_mac`），源 MAC 由出口网卡驱动补齐。DNAT 场景下精准映射到翻译后的内网目标 MAC，避免路由错误。
+* **UDP 双向确认（`udp_require_reply`）**：
+  默认要求 conntrack 标记包含 `IPS_SEEN_REPLY_BIT`，单向 UDP 报文不建加速表，防止单包探测占用表项；若有单向 UDP 业务需求（如 Syslog），可置 `udp_require_reply=0`。
+* **连接容量扩展**：
+  哈希表扩展至 16 位（65536 桶），单协议族上限 65536 条（IPv4/IPv6 合计 131072 条）。超出上限时平滑返回 `SFE_RET_MAX_CONN_COUNT_REACHED`，未加速流量继续走内核协议栈转发。
+
+### 2.8 模块参数一览
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `delay_pkts` | 8 | 每条流前 N 个报文留在内核协议栈转发，用于过滤短连接并预留分流窗口；>0 时自动启用 conntrack 计账。UCI：`firewall.@defaults[0].sfe_delay_pkts` |
+| `fast_xmit` | 1 | 允许无流控设备绕过 Qdisc 直发驱动；0 = 统一使用 `dev_queue_xmit()`。UCI：`firewall.@defaults[0].sfe_fast_xmit` |
+| `udp_require_reply` | 1 | UDP 会话是否必须见到回包才建立加速表；0 = 允许单向 UDP 报文加速 |
+| `pppoe_top_xmit` | 1 | PPPoE 顶层设备（如 `pppoe-wan`）存在流控时，改由顶层设备发包以兼容队列调度；0 = 拒绝加速受影响的流 |
+| `dscp_remark` | 0 | 是否由引擎在快路径将建流时的 DSCP 重写至双向报文；0 = 保留各报文原生 DSCP |
+| `src_iface_check` | 0 | 是否校验报文入接口与建流接口一致；0 = 允许不一致报文退回协议栈处理 |
+| `tcp_no_seq_check` | 0 | 是否跳过引擎对 TCP 序列号与窗口的校验；1 = 允许免校验加速 |
+| `status`（只读） | — | 读取 `/sys/module/shortcut_fe_cm/parameters/status` 输出当前生效参数与计数统计 |
+
+### 2.9 规则扩展能力说明
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| **连接标记（connmark）同步** | 默认启用 | 建流时将 `ct->mark` 写入规则（`SFE_RULE_CREATE_MARK_VALID`），快路径将其写回 `skb->mark`，并在定期同步时持续同步标记变更，使基于 mark 的流控与策略路由持续生效。`ct->mark == 0` 时不置标志。 |
+| **引擎丢流感知** | 默认启用 | 注册单条规则同步回调（`SFE_RX_CONN_STATS_SYNC_MSG`）：当引擎因校验异常、GSO 或表项淘汰移除某条加速流时，更新 `engine_flushed` 计数并通过限速日志记录五元组与原因。 |
+| **DSCP 双向改写** | 需配置 `dscp_remark=1` | 建流时记录首包 DSCP 并交由引擎在快路径重写双向报文。 |
+| **入接口严格校验** | 需配置 `src_iface_check=1` | 下发 `*_SRC_INTERFACE_CHECK_NO_FLUSH`：要求报文必须来自建流时的网络设备，否则回退系统协议栈。 |
+| **跳过 TCP 序列号校验** | 需配置 `tcp_no_seq_check=1` | 下发 `SFE_RULE_CREATE_FLAG_NO_SEQ_CHECK`，用于非对称路由等特定场景。 |
+| **运行状态导出** | 默认启用 | 通过 `status` 参数导出当前参数、加速/拒绝/丢弃/销毁计数以及连接上限，支持 `sfe_dump` 一键查询。 |
+
+注：本移植聚焦于单播 IPv4/IPv6 路由与 NAT 转发，不包含高通私有硬件特性（PPE/SAWF）及组播转发。
 
 ---
 
 ## 3. PPPoE 加速
 
-ppp netdev 是单队列且 `tx_queue_len = 3`，上行所有包排在 `ppp_xmit_lock()`（`spin_lock_bh(&ppp->wlock)`）后面，下行是 `pppoe_rcv → ppp_input` 一条 upcall。SFE 让加速流不再进 ppp。
+Linux PPP 虚拟网卡为单队列且持有队列自旋锁（`ppp_xmit_lock`），上下行经由内核驱动开销较高。SFE 通过旁路处理实现 PPPoE 会话线速转发。
 
 ### 数据面
-* 上行（Encap）：LAN 进来的 IP 帧由 SFE 压入 PPPoE + PPP 头（`sfe_pppoe_add_header()`，纯 `skb_push`）并填 BRAS MAC，直接从物理网卡发出。
-* 下行（Decap）：收到 `ETH_P_PPP_SES`(0x8864) 原始帧时校验 session id 与对端 MAC，剥掉 8 字节 PPPoE/PPP 头，按普通 IP 帧发往 LAN。
+* **上行（Encap）**：LAN 侧进入的 IP 报文由 SFE 压入 PPPoE 与 PPP 报头并填充 BRAS MAC，直接从物理网卡发送。
+* **下行（Decap）**：收到 `ETH_P_PPP_SES`（0x8864）报文时校验 Session ID 与对端 MAC，剥除 PPPoE/PPP 头后直接发往 LAN。
 
-### 与钩子位置的关系
-* 开了 `CONFIG_SHORTCUT_FE`（953 的 `netif_receive` 钩子）：上下行都能加速。
-* 原生内核（netfilter `PRE_ROUTING` 钩子）：钩子看到的已是 `pppoe-wan` 上的裸 IP 包，只有上行能被接管，下行回到内核慢路径（不影响通断）。
+### 钩子模式与转发路径
+* **打入 953 补丁（`CONFIG_SHORTCUT_FE=y`）**：在 L2 `netif_receive` 入口钩子拦截，上下行均可由 SFE 完整卸载。
+* **原生通用内核**：Netfilter `PRE_ROUTING` 钩子处理解封装后的 IP 报文，上行由 SFE 加速，下行由内核协议栈处理。
 
 | 方向 | 原生内核 | `CONFIG_SHORTCUT_FE=y` |
 | --- | --- | --- |
-| 上行 LAN→WAN | 直发物理网卡，绕开 ppp | 同左 |
-| 下行 WAN→LAN | 走内核慢路径 | 自己剥头进 LAN |
+| 上行 LAN→WAN | 直发物理网卡，绕开 PPP | 直发物理网卡，绕开 PPP |
+| 下行 WAN→LAN | 走内核慢路径 | SFE 解封装直发 LAN |
+
+* **物理出口直发模式**（无流控）：
+  SFE 自行处理 PPPoE 封装与解封装，直接调用物理网卡驱动发送，避开 PPP 队列与锁竞争。
+* **顶层设备加速模式**（`pppoe-wan` 配置流控时）：
+  当顶层接口挂载 Qdisc 或 TC 程序时，SFE 切换为向顶层设备发包（受 `pppoe_top_xmit` 控制）。SFE 跳过路由与 Netfilter 慢路径，封包与流控排队交由 PPP 驱动处理，兼顾转发效率与队列调度。
 
 ### 控制面
-QCA 原版用的 `pppoe_channel_addressing_get` 是私有导出符号，标准内核没有，这里用 5.13+ 的 `dev_fill_forward_path()`：
-1. 入/出设备是 `ARPHRD_PPP`（`pppoe-wan`）时 `dst_neigh_lookup()` 没有 ARP 邻居，走虚拟设备分支；
-2. `dev_fill_forward_path(dst->dev, NULL, &stack)` 回溯出 `DEV_PATH_PPPOE`（Session ID + BRAS MAC）与其后的 `DEV_PATH_ETHERNET`（物理出口）；
-3. 接口设备取最后一跳、`pppoe-wan` 作 top 并置 `USE_FLOW/RETURN_BOTTOM_INTERFACE`；
-4. 回溯失败则放弃加速，交回内核慢路径。
+通过 Linux 5.13+ 引入的 `dev_fill_forward_path()` 解析转发链路：
+1. 入/出设备为 PPP 类型（`ARPHRD_PPP`）时，通过 `dev_fill_forward_path()` 回溯出 `DEV_PATH_PPPOE`（Session ID 与 BRAS MAC）及随后的物理网卡 `DEV_PATH_ETHERNET`；
+2. 物理网卡作为底层出口接口，`pppoe-wan` 作为顶层设备并标记 `USE_FLOW/RETURN_BOTTOM_INTERFACE`；
+3. 链路解析失败时回退至系统内核协议栈转发。
 
 ---
 
@@ -119,7 +164,7 @@ QCA 原版用的 `pppoe_channel_addressing_get` 是私有导出符号，标准�
 
 ### 防火墙与 LuCI 集成
 * **LuCI 界面**：“网络” -> “防火墙” -> “常规设置” 中，分流模式选择 `Shortcut-FE v2 flow offloading` 并保存应用。
-* **按需加载与热重载**：模块取消了开机自动盲载。通过 `ucitrack` 联动，当防火墙配置启用 `shortcut_fe` 时自动 `modprobe` 对应模块，禁用时自动 `rmmod` 卸载。
+* **按需加载与热重载**：模块由防火墙按需管理。通过 `ucitrack` 联动，在防火墙启用 `shortcut_fe` 时自动加载模块，禁用时自动卸载。
 
 ### 命令行排查
 `@bash

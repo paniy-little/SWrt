@@ -23,6 +23,8 @@
 #if defined(SFE_SUPPORT_IPV6)
 #include <linux/netfilter_ipv6.h>
 #endif
+#include <net/sch_generic.h>
+#include <net/pkt_sched.h>
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0))
 #include <linux/unaligned.h>
@@ -119,6 +121,132 @@ static inline struct rtable *sfe_ip_route_output(struct net *net, __be32 daddr, 
 #endif
 
 /*
+ * Transmit path inspection.
+ *
+ * All three questions below exist to answer one thing: "would bypassing this
+ * device's queue and TC programs change something the user asked for?".  A
+ * blacklist of qdisc names cannot answer it: it fires on whatever the
+ * distribution installs as its default queueing discipline (OpenWrt builds with
+ * CONFIG_DEFAULT_NET_SCH="fq_codel", so every single queue device would be
+ * flagged as shaped and fast transmit would never be used), and it misses every
+ * discipline that is not spelled out in the list (cake below an mq root, a
+ * shaper added by a newer kernel, an out of tree qdisc).
+ *
+ * The test is therefore inverted: only a queue that cannot be doing anything
+ * interesting may be bypassed, namely
+ *   - the built in FIFOs (noqueue/noop/pfifo/pfifo_fast),
+ *   - the multiqueue container, whose children are inspected instead,
+ *   - whatever the kernel installed as net.core.default_qdisc
+ *     (CONFIG_DEFAULT_NET_SCH), which is never a user's traffic policy.
+ * Everything else keeps its packets.
+ *
+ * A device is "shaped" for traffic control purposes as soon as it has a TC
+ * ingress or egress program attached; note that a bare clsact qdisc is enough,
+ * because the kernel creates the tcx entry when clsact is attached even if no
+ * filter was added to it.
+ *
+ * The helpers must be called from an RCU read side section: dev->qdisc,
+ * txq->qdisc and dev->tcx_* are all RCU protected.
+ */
+static inline bool sfe_qdisc_is_trivial(const struct Qdisc *q)
+{
+	const char *id;
+
+	if (!q || !q->ops)
+		return true;
+
+	if (q->ops == default_qdisc_ops || q->ops == &pfifo_fast_ops)
+		return true;
+
+	id = q->ops->id;
+	return !strcmp(id, "noqueue") || !strcmp(id, "noop");
+}
+
+static inline bool sfe_dev_has_shaping_qdisc(struct net_device *dev)
+{
+	const struct Qdisc *q;
+	unsigned int i;
+
+	RCU_LOCKDEP_WARN(!rcu_read_lock_held() && !rcu_read_lock_bh_held(),
+			 "sfe: qdisc probe outside of an RCU read side section");
+	if (!dev)
+		return false;
+
+	q = rcu_dereference(dev->qdisc);
+	if (!q || !q->ops)
+		return false;
+
+	if (!strcmp(q->ops->id, "mq")) {
+		/*
+		 * Multiqueue devices keep the real queueing discipline on their
+		 * per queue children - that is where SQM attaches cake - so the
+		 * root qdisc alone does not say anything.
+		 */
+		for (i = 0; i < dev->num_tx_queues; i++) {
+			const struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
+
+			if (!sfe_qdisc_is_trivial(rcu_dereference(txq->qdisc)))
+				return true;
+		}
+		return false;
+	}
+
+	return !sfe_qdisc_is_trivial(q);
+}
+
+static inline bool sfe_dev_has_tc_ingress(struct net_device *dev)
+{
+#ifdef CONFIG_NET_CLS_ACT
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
+	return rcu_access_pointer(dev->miniq_ingress) != NULL;
+#else
+	return rcu_access_pointer(dev->tcx_ingress) != NULL;
+#endif
+#else
+	return false;
+#endif
+}
+
+static inline bool sfe_dev_has_tc_egress(struct net_device *dev)
+{
+#ifdef CONFIG_NET_CLS_ACT
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
+	return rcu_access_pointer(dev->miniq_egress) != NULL;
+#else
+	return rcu_access_pointer(dev->tcx_egress) != NULL;
+#endif
+#else
+	return false;
+#endif
+}
+
+/*
+ * Is bypassing this device's transmit path a problem?  Only egress traffic
+ * control matters here: the packet is already leaving through the device.
+ */
+static inline bool sfe_dev_tx_is_shaped(struct net_device *dev)
+{
+	if (!dev)
+		return false;
+
+	return sfe_dev_has_tc_egress(dev) || sfe_dev_has_shaping_qdisc(dev);
+}
+
+/*
+ * Is bypassing this device a problem in both directions?  Used for devices the
+ * engine does not transmit on at all (the top device of a stacked interface
+ * such as pppoe-wan when the frame is handed to the bottom eth0): those are
+ * skipped for ingress as well, so their TC ingress programs matter too.
+ */
+static inline bool sfe_dev_is_shaped(struct net_device *dev)
+{
+	if (!dev)
+		return false;
+
+	return sfe_dev_has_tc_ingress(dev) || sfe_dev_tx_is_shaped(dev);
+}
+
+/*
  * dev_fast_xmit - Zero-overhead fast transmit path that bypasses Linux qdisc
  * Directly locks TX queue and calls netdev_start_xmit().
  * If TX queue is full or stopped, returns false to fall back to dev_queue_xmit().
@@ -162,6 +290,16 @@ static inline bool dev_fast_xmit(struct sk_buff *skb,
 	rcu_read_lock_bh();
 	cpu = smp_processor_id();
 
+	/*
+	 * Traffic control can be attached to the device at any time, long after this
+	 * fast transmit path was enabled for the flow, so the state has to be looked
+	 * at for every packet.  This runs inside the RCU section below because
+	 * dev->qdisc and the tcx entries are RCU protected; bailing out here leaves
+	 * the skb untouched for the caller, which falls back to dev_queue_xmit()
+	 * (dst, queue mapping and the reference are all still in place).
+	 */
+	if (unlikely(sfe_dev_tx_is_shaped(dev)))
+		goto fail;
 	if (likely(dev->priv_flags & IFF_XMIT_DST_RELEASE)) {
 		skb_dst_drop(skb);
 	} else {
@@ -169,8 +307,17 @@ static inline bool dev_fast_xmit(struct sk_buff *skb,
 			goto fail;
 	}
 
-	queue_index = netdev_pick_tx(dev, skb, NULL);
+	/*
+	 * Mirror netdev_core_pick_tx(): cap the index against this device's queue
+	 * count and record it in the skb before netdev_start_xmit().  Drivers index
+	 * their TX ring with skb_get_queue_mapping() (ixgbe does so without any
+	 * bounds check), and what the skb still carries here is the *ingress*
+	 * device's RX queue - one based - which can point past the egress device's
+	 * ring when the LAN side has more queues than the WAN side.
+	 */
+	queue_index = netdev_cap_txqueue(dev, netdev_pick_tx(dev, skb, NULL));
 	txq = netdev_get_tx_queue(dev, queue_index);
+	skb_set_queue_mapping(skb, queue_index);
 
 	if (likely(txq->xmit_lock_owner != cpu)) {
 		HARD_TX_LOCK(dev, txq, cpu);

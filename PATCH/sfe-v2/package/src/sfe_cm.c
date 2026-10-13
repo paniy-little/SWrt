@@ -36,6 +36,10 @@
 #include <linux/netfilter_ipv6.h>
 #include <linux/inetdevice.h>
 #include <net/addrconf.h>
+#include <net/sch_generic.h>
+#include <net/pkt_sched.h>
+#include <linux/percpu.h>
+#include <linux/cpumask.h>
 
 #include "sfe_cm.h"
 #include "exports/sfe_api.h"
@@ -107,6 +111,25 @@ static inline void sfe_cm_add_acct(struct nf_conn *ct, int dir, u64 pkts, u64 by
 #endif
 }
 
+static inline u64 sfe_cm_get_pkt_count(struct nf_conn *ct)
+{
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0))
+	struct nf_conn_acct *acct = nf_conn_acct_find(ct);
+	if (acct) {
+		struct nf_conn_counter *counter = acct->counter;
+		return atomic64_read(&counter[IP_CT_DIR_ORIGINAL].packets) +
+		       atomic64_read(&counter[IP_CT_DIR_REPLY].packets);
+	}
+#else
+	struct nf_conn_counter *counter = nf_conn_acct_find(ct);
+	if (counter) {
+		return atomic64_read(&counter[IP_CT_DIR_ORIGINAL].packets) +
+		       atomic64_read(&counter[IP_CT_DIR_REPLY].packets);
+	}
+#endif
+	return U64_MAX; /* Accounting disabled; do not delay offload */
+}
+
 /*
  * Periodic connection synchronisation.
  *
@@ -155,7 +178,265 @@ static struct sfe_ctx_instance *sfe_v4_ctx;
 static struct sfe_ctx_instance *sfe_v6_ctx;
 #endif
 
+/*
+ * Module parameters:
+ * - delay_pkts (default: 8): Number of initial packets to leave in the Linux
+ *   stack before offloading.  Gives transparent proxies (dae, honk, Clash,
+ *   sing-box) and DPI a window to inspect the flow (TLS SNI, HTTP Host, QUIC
+ *   Initial), and keeps short lived flows (DNS, NTP, port scans) out of the
+ *   table.  Needs conntrack accounting, see sfe_cm_init().
+ * - fast_xmit (default: true): Allow handing frames straight to the driver.  A
+ *   device is only bypassed when its egress path has nothing but a trivial queue
+ *   (see sfe_compat.h): a qdisc somebody configured, a TC program or an mq child
+ *   keeps the packets on dev_queue_xmit().
+ * - udp_require_reply (default: true): Only offload a UDP flow once a reply was
+ *   seen; set to 0 to also accelerate genuinely unidirectional UDP flows.
+ * - pppoe_top_xmit (default: true): Keep a PPPoE flow accelerated through
+ *   pppoe-wan when that device does traffic control (the kernel then does the
+ *   PPPoE encapsulation); 0 refuses such flows instead.
+ */
+static unsigned int sfe_cm_delay_pkts = 8;
+module_param_named(delay_pkts, sfe_cm_delay_pkts, uint, 0644);
+MODULE_PARM_DESC(delay_pkts, "Initial packets to leave in Linux stack before offloading (default 8)");
+
+static bool sfe_cm_fast_xmit = true;
+module_param_named(fast_xmit, sfe_cm_fast_xmit, bool, 0644);
+MODULE_PARM_DESC(fast_xmit, "Enable direct hardware transmission where no SQM/TC-egress is active (default 1)");
+
+static bool sfe_cm_udp_require_reply = true;
+module_param_named(udp_require_reply, sfe_cm_udp_require_reply, bool, 0644);
+MODULE_PARM_DESC(udp_require_reply, "Require a confirmed reply before offloading a UDP flow (default 1)");
+
+static bool sfe_cm_pppoe_top_xmit = true;
+module_param_named(pppoe_top_xmit, sfe_cm_pppoe_top_xmit, bool, 0644);
+MODULE_PARM_DESC(pppoe_top_xmit, "Keep PPPoE flows accelerated through the top device when it has traffic control (default 1), 0 = refuse them");
+
+/*
+ * Optional rule features.  All three are off by default: they change what the
+ * engine does to the packets of an accelerated flow and none of them is needed
+ * for plain forwarding.
+ */
+static bool sfe_cm_dscp_remark;
+module_param_named(dscp_remark, sfe_cm_dscp_remark, bool, 0644);
+MODULE_PARM_DESC(dscp_remark, "Carry the DSCP a flow was offloaded with into both directions (default 0: every packet keeps its own DSCP)");
+
+static bool sfe_cm_src_iface_check;
+module_param_named(src_iface_check, sfe_cm_src_iface_check, bool, 0644);
+MODULE_PARM_DESC(src_iface_check, "Only accelerate packets arriving on the device a flow was built for; others go to the stack (default 0)");
+
+static bool sfe_cm_tcp_no_seq_check;
+module_param_named(tcp_no_seq_check, sfe_cm_tcp_no_seq_check, bool, 0644);
+MODULE_PARM_DESC(tcp_no_seq_check, "Skip the engine's TCP sequence and window validation (default 0)");
+
+/*
+ * delay_pkts counts packets through the conntrack accounting extension, so the
+ * window cannot work without accounting.  Rather than making every user wire up
+ * the sysctl - and rather than silently ignoring the window when it is missing -
+ * the connection manager turns accounting on itself when a window is configured
+ * and puts the previous setting back when it is unloaded.  With delay_pkts=0
+ * nothing is touched and nothing is paid for.
+ *
+ * -1: we did not change it.
+ */
+static int sfe_cm_acct_prev = -1;
+
+/*
+ * Counters for the status attribute.  They are only touched when a rule is
+ * created, refused, flushed or destroyed, never per packet.
+ */
+static atomic64_t sfe_cm_stat_created = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_refused = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_flushed = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_destroyed = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_mark_pushed = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_memo_added = ATOMIC64_INIT(0);
+
+/*
+ * May SFE hand this device's frames straight to the driver?
+ *
+ * Only egress traffic control matters here: the packet is on its way out, so a
+ * qdisc or a TC egress program means it has to go through dev_queue_xmit()
+ * instead.  See sfe_compat.h for how "traffic control" is decided - an allowlist
+ * of trivial queues, not a list of shaper names.
+ */
+static inline bool sfe_cm_dev_can_fast_xmit(struct net_device *dev)
+{
+	if (!sfe_cm_fast_xmit || !dev)
+		return false;
+
+	return !sfe_dev_tx_is_shaped(dev);
+}
+
+/*
+ * PPPoE: send on the bottom device or through the top one?
+ *
+ * The engine can write and strip the PPPoE header itself and hand the frame to
+ * the bottom device (eth0), which is what makes PPPoE forwarding fast.  It
+ * cannot honour traffic control attached to the top device (pppoe-wan) in that
+ * mode, because neither pppoe-wan's queue nor its TC programs are on the path.
+ *
+ * When the top device does have traffic control, a side is therefore kept on the
+ * top device instead: the engine matches and transmits plain IP frames, the ppp
+ * stack writes and strips the PPPoE header as usual, and pppoe-wan's qdisc and
+ * TC programs run.  Routing, conntrack and netfilter are still skipped; the cost
+ * is that the PPPoE part stays in the kernel stack.
+ *
+ * pppoe_top_xmit=0 disables that and refuses such flows instead (see below).
+ */
+static inline bool sfe_cm_pppoe_use_top(struct net_device *top_dev)
+{
+	return sfe_cm_pppoe_top_xmit && sfe_dev_is_shaped(top_dev);
+}
+
+/*
+ * A stacked side the engine would have to bypass must not be doing traffic
+ * control.  sfe_cm_pppoe_use_top() already resolves that case by keeping the top
+ * device as the interface; what is left here is the pppoe_top_xmit=0 fallback,
+ * where the flow is refused instead - the packets then take the ordinary kernel
+ * path, qdisc and TC included.
+ */
+static struct net_device *sfe_cm_bypass_refused(struct sfe_connection_create *sic)
+{
+	if (!sic->flow_top_xmit && sfe_dev_is_shaped(sic->flow_top_dev))
+		return sic->flow_top_dev;
+
+	if (!sic->return_top_xmit && sfe_dev_is_shaped(sic->return_top_dev))
+		return sic->return_top_dev;
+
+	return NULL;
+}
+
+/*
+ * status - read only summary for
+ * /sys/module/shortcut_fe_cm/parameters/status
+ */
+static int sfe_cm_status_get(char *buffer, const struct kernel_param *kp)
+{
+	char *p = buffer;
+
+	p += scnprintf(p, PAGE_SIZE - (p - buffer),
+		       "delay_pkts=%u fast_xmit=%d udp_require_reply=%d pppoe_top_xmit=%d\n"
+		       "dscp_remark=%d src_iface_check=%d tcp_no_seq_check=%d\n"
+		       "rules_created=%llu rules_refused=%llu engine_flushed=%llu flows_destroyed=%llu "
+		       "marks_pushed=%llu refused_memos=%llu\n",
+		       sfe_cm_delay_pkts, sfe_cm_fast_xmit, sfe_cm_udp_require_reply, sfe_cm_pppoe_top_xmit,
+		       sfe_cm_dscp_remark, sfe_cm_src_iface_check, sfe_cm_tcp_no_seq_check,
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_created),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_refused),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_flushed),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_destroyed),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_mark_pushed),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_memo_added));
+
+	p += scnprintf(p, PAGE_SIZE - (p - buffer), "conntrack_acct=%d acct_enabled_by_us=%d\n",
+		       nf_ct_acct_enabled(&init_net) ? 1 : 0, sfe_cm_acct_prev >= 0);
+
+#if defined(SFE_SUPPORT_IPV6)
+	p += scnprintf(p, PAGE_SIZE - (p - buffer), "max_connections ipv4=%d ipv6=%d\n",
+		       sfe_ipv4_max_conn_count(), sfe_ipv6_max_conn_count());
+#else
+	p += scnprintf(p, PAGE_SIZE - (p - buffer), "max_connections ipv4=%d\n",
+		       sfe_ipv4_max_conn_count());
+#endif
+
+	return p - buffer;
+}
+
+static const struct kernel_param_ops sfe_cm_status_ops = {
+	.get = sfe_cm_status_get,
+};
+
+module_param_cb(status, &sfe_cm_status_ops, NULL, 0444);
+MODULE_PARM_DESC(status, "Read only summary of the connection manager parameters and counters");
+
+/*
+ * DSCP (the six bit traffic class) of a packet that is about to be forwarded,
+ * taken at rule creation, i.e. after the netfilter mangle chains ran.
+ */
+static inline u8 sfe_cm_skb_dscp(struct sk_buff *skb, bool is_v4)
+{
+	if (is_v4) {
+		return (ip_hdr(skb)->tos & 0xfc) >> 2;
+	}
+
+	{
+		const u8 *p = (const u8 *)ipv6_hdr(skb);
+		return (u8)(((p[0] & 0x0f) << 2) | ((p[1] & 0xc0) >> 6));
+	}
+}
+
+/*
+ * Flows that were refused acceleration keep walking through post-routing, so
+ * remember their conntrack entry in a small per-CPU ring: without it every
+ * packet of such a flow would pay for the route and neighbour lookups again.
+ * Entries are dropped when the conntrack entry dies.
+ *
+ * The test/add side runs from the packet hook; get_cpu_ptr()/put_cpu_ptr() keep
+ * the per-CPU access valid whatever context that hook runs in.
+ */
+#define SFE_CM_NO_ACCEL_SLOTS	32
+struct sfe_cm_no_accel_ring {
+	struct nf_conn *ct[SFE_CM_NO_ACCEL_SLOTS];
+};
+
+static DEFINE_PER_CPU(struct sfe_cm_no_accel_ring, sfe_cm_no_accel);
+static DEFINE_PER_CPU(unsigned int, sfe_cm_no_accel_next);
+
+static bool sfe_cm_no_accel_test(struct nf_conn *ct)
+{
+	struct sfe_cm_no_accel_ring *ring;
+	bool found = false;
+	int i;
+
+	ring = get_cpu_ptr(&sfe_cm_no_accel);
+	for (i = 0; i < SFE_CM_NO_ACCEL_SLOTS; i++) {
+		if (READ_ONCE(ring->ct[i]) == ct) {
+			found = true;
+			break;
+		}
+	}
+	put_cpu_ptr(&sfe_cm_no_accel);
+
+	return found;
+}
+
+static void sfe_cm_no_accel_add(struct nf_conn *ct)
+{
+	struct sfe_cm_no_accel_ring *ring;
+	unsigned int *next;
+
+	atomic64_inc(&sfe_cm_stat_memo_added);
+
+	ring = get_cpu_ptr(&sfe_cm_no_accel);
+	next = this_cpu_ptr(&sfe_cm_no_accel_next);
+
+	WRITE_ONCE(ring->ct[*next], ct);
+	*next = (*next + 1) % SFE_CM_NO_ACCEL_SLOTS;
+	put_cpu_ptr(&sfe_cm_no_accel);
+}
+
+/*
+ * Called from the conntrack destroy callback, which can run in atomic context:
+ * only pointer comparisons happen here, never a dereference, so a forgotten
+ * entry can at worst keep a recycled conntrack address out of the fast path.
+ */
+static void sfe_cm_no_accel_del(struct nf_conn *ct)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		struct sfe_cm_no_accel_ring *ring = per_cpu_ptr(&sfe_cm_no_accel, cpu);
+		int i;
+
+		for (i = 0; i < SFE_CM_NO_ACCEL_SLOTS; i++) {
+			if (READ_ONCE(ring->ct[i]) == ct)
+				WRITE_ONCE(ring->ct[i], NULL);
+		}
+	}
+}
+
 static void sfe_cm_sync_work(struct work_struct *work);
+static void sfe_cm_shaped_dev_scan(void);
 
 /*
  * Vanilla kernels have a single conntrack event notifier slot.  We take it over
@@ -169,9 +450,17 @@ static void sfe_cm_conntrack_notifier_reclaim(void);
 static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 {
 	struct sfe_ipv4_msg msg;
+	struct net_device *shaped;
 
 	if (unlikely(!sfe_v4_ctx))
 		return -EINVAL;
+
+	shaped = sfe_cm_bypass_refused(sic);
+	if (unlikely(shaped)) {
+		pr_info_ratelimited("sfe_cm: %s does traffic control, leaving this flow to the kernel\n",
+				    shaped->name);
+		return -EOPNOTSUPP;
+	}
 
 	memset(&msg, 0, sizeof(msg));
 	sfe_ipv4_msg_init(&msg, 0, SFE_TX_CREATE_RULE_MSG,
@@ -179,17 +468,27 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 
 	msg.msg.rule_create.valid_flags = SFE_RULE_CREATE_CONN_VALID;
 	/*
-	 * Ask the engine to try the qdisc-bypassing transmit path in both
-	 * directions.  The engine still validates every flow once (GSO, VLAN,
-	 * XFRM, socket validation) and silently falls back to dev_queue_xmit()
-	 * where the fast path is not usable.
-	 *
-	 * Trade-off, see README.md: traffic control (SQM/cake shaping, egress
-	 * filters, qdisc statistics) is bypassed for accelerated flows.
+	 * Decide fast transmission independently for each egress direction:
+	 * dest_dev is the flow egress (the engine's original_cm->xmit_dev) and
+	 * src_dev the return egress.  An egress device with a configured qdisc or a
+	 * TC program keeps its packets on dev_queue_xmit() instead.
 	 */
-	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED |
-					 SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST |
-					 SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED;
+	if (sfe_cm_dev_can_fast_xmit(sic->dest_dev))
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST;
+	if (sfe_cm_dev_can_fast_xmit(sic->src_dev))
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+
+	/*
+	 * Optional: have the engine verify that packets arrive on the device the
+	 * flow was built for.  The no-flush variant is used on purpose - a mismatch
+	 * only hands the packet to the stack.  That also keeps bridged LAN traffic
+	 * working, where the L2 hook sees the bridge port while the rule was built
+	 * for the bridge device; the packet is then taken by the prerouting hook.
+	 */
+	if (sfe_cm_src_iface_check)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH |
+						  SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH;
 
 	/*
 	 * A PPPoE side consists of two devices: the bottom one (the real
@@ -223,7 +522,16 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 	msg.msg.rule_create.conn_rule.return_mtu = sic->dest_mtu;
 
 	memcpy(msg.msg.rule_create.conn_rule.flow_mac, sic->src_mac, ETH_ALEN);
-	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac, ETH_ALEN);
+	/*
+	 * return_mac is the address the engine writes when it sends in the flow
+	 * direction, i.e. towards the flow's destination *after* translation, so it
+	 * has to come from the translated destination (dest_ip_xlate).  Using the
+	 * pre-NAT destination here breaks every DNAT'ed flow: for a forwarded port
+	 * the untranslated destination is the router's own WAN address, whose
+	 * neighbour entry resolves to the loopback device and therefore to an
+	 * all-zero MAC.
+	 */
+	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac_xlate, ETH_ALEN);
 
 	if (sic->flow_is_pppoe) {
 		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_PPPOE_DECAP_VALID;
@@ -259,6 +567,25 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 		msg.msg.rule_create.qos_rule.return_qos_tag = sic->dest_priority;
 	}
 
+	/*
+	 * Carry the connection mark into the fast path: the engine then writes it
+	 * into skb->mark, which is what the qdisc (tc fw filters, cake tins) and any
+	 * later consumer see.  Without this, mark based policy is silently lost for
+	 * every accelerated flow.  Only flows that actually carry a mark pay for it.
+	 */
+	if (sic->mark) {
+		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_MARK_VALID;
+		msg.msg.rule_create.mark_rule.flow_mark = sic->mark;
+		msg.msg.rule_create.mark_rule.return_mark = sic->mark;
+	}
+
+	if (sfe_cm_dscp_remark && sic->dscp) {
+		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_DSCP_MARKING_VALID;
+		msg.msg.rule_create.dscp_rule.flow_dscp = sic->dscp;
+		msg.msg.rule_create.dscp_rule.return_dscp = sic->dscp;
+	}
+
+
 	if (sfe_ipv4_tx_with_resp(sfe_v4_ctx, &msg) != SFE_CMN_RESPONSE_ACK) {
 		return -EINVAL;
 	}
@@ -290,19 +617,40 @@ static void sfe_cm_v2_ipv4_destroy_rule(struct sfe_connection_destroy *sid)
 static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 {
 	struct sfe_ipv6_msg msg;
+	struct net_device *shaped;
 
 	if (unlikely(!sfe_v6_ctx))
 		return -EINVAL;
+
+	shaped = sfe_cm_bypass_refused(sic);
+	if (unlikely(shaped)) {
+		pr_info_ratelimited("sfe_cm: %s does traffic control, leaving this flow to the kernel\n",
+				    shaped->name);
+		return -EOPNOTSUPP;
+	}
 
 	memset(&msg, 0, sizeof(msg));
 	sfe_ipv6_msg_init(&msg, 0, SFE_TX_CREATE_RULE_MSG,
 			  sizeof(struct sfe_ipv6_rule_create_msg), NULL, NULL);
 
 	msg.msg.rule_create.valid_flags = SFE_RULE_CREATE_CONN_VALID;
-	/* See sfe_cm_v2_ipv4_create_rule() for the fast transmit trade-off. */
-	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED |
-					 SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST |
-					 SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+	/* See sfe_cm_v2_ipv4_create_rule() for the per-device fast transmit logic. */
+	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED;
+	if (sfe_cm_dev_can_fast_xmit(sic->dest_dev))
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST;
+	if (sfe_cm_dev_can_fast_xmit(sic->src_dev))
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
+
+	/*
+	 * Optional: have the engine verify that packets arrive on the device the
+	 * flow was built for.  The no-flush variant is used on purpose - a mismatch
+	 * only hands the packet to the stack.  That also keeps bridged LAN traffic
+	 * working, where the L2 hook sees the bridge port while the rule was built
+	 * for the bridge device; the packet is then taken by the prerouting hook.
+	 */
+	if (sfe_cm_src_iface_check)
+		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH |
+						  SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH;
 
 	/* See sfe_cm_v2_ipv4_create_rule() for the bottom interface rule. */
 	if (sic->flow_is_pppoe)
@@ -331,7 +679,16 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 	msg.msg.rule_create.conn_rule.return_mtu = sic->dest_mtu;
 
 	memcpy(msg.msg.rule_create.conn_rule.flow_mac, sic->src_mac, ETH_ALEN);
-	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac, ETH_ALEN);
+	/*
+	 * return_mac is the address the engine writes when it sends in the flow
+	 * direction, i.e. towards the flow's destination *after* translation, so it
+	 * has to come from the translated destination (dest_ip_xlate).  Using the
+	 * pre-NAT destination here breaks every DNAT'ed flow: for a forwarded port
+	 * the untranslated destination is the router's own WAN address, whose
+	 * neighbour entry resolves to the loopback device and therefore to an
+	 * all-zero MAC.
+	 */
+	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac_xlate, ETH_ALEN);
 
 	if (sic->flow_is_pppoe) {
 		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_PPPOE_DECAP_VALID;
@@ -359,6 +716,31 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 		if (sic->flags & SFE_CREATE_FLAG_NO_SEQ_CHECK) {
 			msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_NO_SEQ_CHECK;
 		}
+	}
+
+	/* Same rule features as the IPv4 side (this block was missing here). */
+	if (sic->flags & SFE_CREATE_FLAG_REMARK_PRIORITY) {
+		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_QOS_VALID;
+		msg.msg.rule_create.qos_rule.flow_qos_tag = sic->src_priority;
+		msg.msg.rule_create.qos_rule.return_qos_tag = sic->dest_priority;
+	}
+
+	/*
+	 * Carry the connection mark into the fast path: the engine then writes it
+	 * into skb->mark, which is what the qdisc (tc fw filters, cake tins) and any
+	 * later consumer see.  Without this, mark based policy is silently lost for
+	 * every accelerated flow.  Only flows that actually carry a mark pay for it.
+	 */
+	if (sic->mark) {
+		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_MARK_VALID;
+		msg.msg.rule_create.mark_rule.flow_mark = sic->mark;
+		msg.msg.rule_create.mark_rule.return_mark = sic->mark;
+	}
+
+	if (sfe_cm_dscp_remark && sic->dscp) {
+		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_DSCP_MARKING_VALID;
+		msg.msg.rule_create.dscp_rule.flow_dscp = sic->dscp;
+		msg.msg.rule_create.dscp_rule.return_dscp = sic->dscp;
 	}
 
 	if (sfe_ipv6_tx_with_resp(sfe_v6_ctx, &msg) != SFE_CMN_RESPONSE_ACK) {
@@ -552,6 +934,37 @@ static void sfe_cm_sync_rule(struct sfe_connection_sync *sis)
 	sfe_cm_add_acct(ct, IP_CT_DIR_ORIGINAL, sis->src_new_packet_count, sis->src_new_byte_count);
 	sfe_cm_add_acct(ct, IP_CT_DIR_REPLY, sis->dest_new_packet_count, sis->dest_new_byte_count);
 
+	/*
+	 * Keep the engine's copy of the connection mark in step with conntrack
+	 * (policy routing and QoS marks can change while a flow is running).  Only
+	 * marked flows pay for this, and only once per sync round.
+	 */
+	if (ct->mark) {
+		struct sfe_connection_mark cmark;
+
+		memset(&cmark, 0, sizeof(cmark));
+		cmark.protocol = sis->protocol;
+		cmark.src_port = sis->src_port;
+		cmark.dest_port = sis->dest_port;
+		cmark.flow_mark = ct->mark;
+		cmark.return_mark = ct->mark;
+		cmark.type = SFE_CONNECTION_MARK_TYPE_CONNMARK;
+
+		if (sis->is_v6) {
+#ifdef SFE_SUPPORT_IPV6
+			memcpy(cmark.src_ip, sis->src_ip.ip6[0].addr, sizeof(cmark.src_ip));
+			memcpy(cmark.dest_ip, sis->dest_ip.ip6[0].addr, sizeof(cmark.dest_ip));
+			sfe_ipv6_mark_rule_update(&cmark);
+#endif
+		} else {
+			cmark.src_ip[0] = sis->src_ip.ip;
+			cmark.dest_ip[0] = sis->dest_ip.ip;
+			sfe_ipv4_mark_rule_update(&cmark);
+		}
+
+		atomic64_inc(&sfe_cm_stat_mark_pushed);
+	}
+
 	nf_ct_put(ct);
 }
 
@@ -597,6 +1010,27 @@ static void sfe_cm_v2_ipv4_sync_many_callback(void *app_data, struct sfe_ipv4_ms
 		mod_delayed_work(system_wq, &sfe_cm_sync[0].dwork, SFE_CM_SYNC_CHAIN_DELAY);
 }
 
+/*
+ * A single rule the engine flushed or evicted on its own (a packet it could not
+ * handle, an eviction under pressure, a failed check) is reported here.  Nobody
+ * listened before, so such a flow silently vanished from the fast path while the
+ * connection manager kept believing it was accelerated.
+ */
+static void sfe_cm_v2_ipv4_one_sync_callback(void *app_data, struct sfe_ipv4_msg *msg)
+{
+	struct sfe_ipv4_conn_sync *s;
+
+	if (unlikely(!msg || msg->cm.type != SFE_RX_CONN_STATS_SYNC_MSG))
+		return;
+
+	s = &msg->msg.conn_stats;
+	atomic64_inc(&sfe_cm_stat_flushed);
+	pr_info_ratelimited("sfe_cm: engine dropped %pI4:%u -> %pI4:%u (proto %u reason %u cause %u, %u/%u pkts)\n",
+			    &s->flow_ip, ntohs(s->flow_ident), &s->return_ip, ntohs(s->return_ident),
+			    s->protocol, s->reason, s->cause,
+			    s->flow_rx_packet_count, s->return_rx_packet_count);
+}
+
 #ifdef SFE_SUPPORT_IPV6
 static void sfe_cm_v2_ipv6_sync_many_callback(void *app_data, struct sfe_ipv6_msg *msg)
 {
@@ -631,6 +1065,21 @@ static void sfe_cm_v2_ipv6_sync_many_callback(void *app_data, struct sfe_ipv6_ms
 
 	if (many->next)
 		mod_delayed_work(system_wq, &sfe_cm_sync[1].dwork, SFE_CM_SYNC_CHAIN_DELAY);
+}
+
+/* See sfe_cm_v2_ipv4_one_sync_callback(). */
+static void sfe_cm_v2_ipv6_one_sync_callback(void *app_data, struct sfe_ipv6_msg *msg)
+{
+	struct sfe_ipv6_conn_sync *s;
+
+	if (unlikely(!msg || msg->cm.type != SFE_RX_CONN_STATS_SYNC_MSG))
+		return;
+
+	s = &msg->msg.conn_stats;
+	atomic64_inc(&sfe_cm_stat_flushed);
+	pr_info_ratelimited("sfe_cm: engine dropped [%pI6]:%u -> [%pI6]:%u (proto %u reason %u cause %u)\n",
+			    s->flow_ip, ntohs(s->flow_ident), s->return_ip, ntohs(s->return_ident),
+			    s->protocol, s->reason, s->cause);
 }
 #endif
 
@@ -685,6 +1134,15 @@ static void sfe_cm_sync_work(struct work_struct *work)
 	 */
 	sfe_cm_conntrack_notifier_reclaim();
 
+	/*
+	 * Devices can gain traffic control at any time.  The connection table is the
+	 * only place that knows about flows which were built before that, so this is
+	 * where they have to be dropped again.  One family is enough: the scan walks
+	 * all devices and drops their IPv4 as well as their IPv6 flows.
+	 */
+	if (sync->is_v4)
+		sfe_cm_shaped_dev_scan();
+
 	sfe_cm_sync_request(sync->is_v4);
 
 	/*
@@ -703,10 +1161,10 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	struct net_device *in, *src_dev, *dest_dev;
 	struct net_device *src_dev_tmp = NULL, *dest_dev_tmp = NULL;
 	struct net_device *src_br_dev = NULL, *dest_br_dev = NULL;
-	struct net_device *dev;
 	enum ip_conntrack_info ctinfo;
 	struct nf_conn *ct;
 	struct nf_conntrack_tuple orig_tuple, reply_tuple;
+	int result;
 
 	if (unlikely(skb->pkt_type == PACKET_BROADCAST || skb->pkt_type == PACKET_MULTICAST))
 		return NF_ACCEPT;
@@ -738,6 +1196,30 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 		return NF_ACCEPT;
 
 	if (unlikely(nfct_help(ct)))
+		return NF_ACCEPT;
+
+	/*
+	 * A flow that was already refused acceleration must not be re-examined on
+	 * every one of its packets (the decision depends on devices only, never on
+	 * the packet).
+	 */
+	if (unlikely(sfe_cm_no_accel_test(ct)))
+		return NF_ACCEPT;
+
+	/*
+	 * Delay offloading until the connection has exchanged at least
+	 * sfe_cm_delay_pkts packets.
+	 *
+	 * This provides a critical "decision window" for transparent proxies
+	 * (dae, honk, Clash, sing-box) and DPI/firewall software to inspect
+	 * initial packets (e.g. TLS ClientHello / SNI, HTTP Host, QUIC Initial)
+	 * and claim/redirect the flow before SFE accelerates it.
+	 *
+	 * Furthermore, it filters out short-lived "mice flows" (DNS queries,
+	 * NTP, port scans) from polluting SFE connection tables, eliminating
+	 * hash churn and spinlock contention on transient traffic.
+	 */
+	if (sfe_cm_delay_pkts && sfe_cm_get_pkt_count(ct) < sfe_cm_delay_pkts)
 		return NF_ACCEPT;
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
@@ -789,6 +1271,18 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 		break;
 
 	case IPPROTO_UDP:
+		/*
+		 * Only offload bidirectional, confirmed UDP sessions.  Single-packet
+		 * UDP queries or initial ambiguous packets (e.g., DNS, QUIC being
+		 * sniffed by dae/honk or queued in NFQUEUE) must not be prematurely
+		 * offloaded.  Note that this also keeps genuinely unidirectional flows
+		 * (syslog, SNMP traps, one-way RTP/IPTV) out of the engine for good;
+		 * udp_require_reply=0 restores the previous behaviour of offloading
+		 * them.
+		 */
+		if (sfe_cm_udp_require_reply && !test_bit(IPS_SEEN_REPLY_BIT, &ct->status))
+			return NF_ACCEPT;
+
 		sic.src_port = orig_tuple.src.u.udp.port;
 		sic.dest_port = orig_tuple.dst.u.udp.port;
 		sic.src_port_xlate = reply_tuple.dst.u.udp.port;
@@ -805,19 +1299,30 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 		sic.flags |= SFE_CREATE_FLAG_REMARK_PRIORITY;
 	}
 
+	/*
+	 * Optional rule inputs.  The connection mark is always carried over (it
+	 * costs a branch only for flows that use marks); DSCP and the TCP sequence
+	 * check are opt in.
+	 */
+	sic.mark = ct->mark;
+	if (sfe_cm_dscp_remark)
+		sic.dscp = sfe_cm_skb_dscp(skb, is_v4);
+	if (sfe_cm_tcp_no_seq_check)
+		sic.flags |= SFE_CREATE_FLAG_NO_SEQ_CHECK;
+
 	if (!sfe_cm_find_dev_and_mac_addr(&sic.src_ip, &src_dev_tmp, sic.src_mac, is_v4,
 					  &sic.flow_is_pppoe, &sic.flow_pppoe_session_id, sic.flow_pppoe_remote_mac, &sic.flow_top_dev))
 		return NF_ACCEPT;
 	src_dev = src_dev_tmp;
 
-	if (!sfe_cm_find_dev_and_mac_addr(&sic.src_ip_xlate, &dev, sic.src_mac_xlate, is_v4, NULL, NULL, NULL, NULL))
-		goto done1;
-	dev_put(dev);
-
-	if (!sfe_cm_find_dev_and_mac_addr(&sic.dest_ip, &dev, sic.dest_mac, is_v4, NULL, NULL, NULL, NULL))
-		goto done1;
-	dev_put(dev);
-
+	/*
+	 * The translated source (reply_tuple.dst) is the source address the peer
+	 * replies to - it never ends up in an L2 header, the engine only writes the
+	 * peer addresses it sends to - and the untranslated destination is wrong for
+	 * DNAT'ed flows (see sfe_cm_v2_ipv4_create_rule()).  Neither lookup is
+	 * therefore done: this also removes two failure points and two route and
+	 * neighbour lookups from every rule creation.
+	 */
 	if (!sfe_cm_find_dev_and_mac_addr(&sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4,
 					  &sic.return_is_pppoe, &sic.return_pppoe_session_id, sic.return_pppoe_remote_mac, &sic.return_top_dev))
 		goto done1;
@@ -837,17 +1342,44 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 		dest_dev = dest_br_dev;
 	}
 
+	/*
+	 * See sfe_cm_pppoe_use_top(): a stacked side whose top device does traffic
+	 * control is kept on that top device, so the kernel keeps doing the PPPoE
+	 * encapsulation and pppoe-wan's queue and TC programs stay in the path.  The
+	 * top device reference is already held and released by the cleanup below.
+	 */
+	if (sic.flow_is_pppoe && sfe_cm_pppoe_use_top(sic.flow_top_dev)) {
+		src_dev = sic.flow_top_dev;
+		sic.flow_is_pppoe = false;
+		sic.flow_top_xmit = true;
+	}
+
+	if (sic.return_is_pppoe && sfe_cm_pppoe_use_top(sic.return_top_dev)) {
+		dest_dev = sic.return_top_dev;
+		sic.return_is_pppoe = false;
+		sic.return_top_xmit = true;
+	}
+
 	sic.src_dev = src_dev;
 	sic.dest_dev = dest_dev;
 	sic.src_mtu = src_dev->mtu;
 	sic.dest_mtu = dest_dev->mtu;
 
 	if (likely(is_v4)) {
-		sfe_cm_v2_ipv4_create_rule(&sic);
+		result = sfe_cm_v2_ipv4_create_rule(&sic);
 	} else {
 #ifdef SFE_SUPPORT_IPV6
-		sfe_cm_v2_ipv6_create_rule(&sic);
+		result = sfe_cm_v2_ipv6_create_rule(&sic);
+#else
+		result = -EINVAL;
 #endif
+	}
+
+	if (unlikely(result == -EOPNOTSUPP)) {
+		atomic64_inc(&sfe_cm_stat_refused);
+		sfe_cm_no_accel_add(ct);
+	} else if (likely(!result)) {
+		atomic64_inc(&sfe_cm_stat_created);
 	}
 
 	if (dest_br_dev)
@@ -923,6 +1455,9 @@ static void sfe_cm_conntrack_destroy(unsigned int events, const struct nf_ct_eve
 		return;
 
 	ct = item->ct;
+
+	atomic64_inc(&sfe_cm_stat_destroyed);
+	sfe_cm_no_accel_del(ct);
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 	sid.protocol = orig_tuple.dst.protonum;
@@ -1088,6 +1623,63 @@ static void sfe_cm_flush_dev(struct net_device *dev)
 #endif
 }
 
+/*
+ * Traffic control can be attached to a device long after a flow was built,
+ * including to a device the engine bypasses (see sfe_cm_shaped_bypass_dev()).
+ * Such flows would keep skipping it, so watch the devices from the periodic work
+ * and drop the flows of a device the first time it becomes shaped; from then on
+ * they are either rebuilt with fast transmit disabled or refused altogether.
+ *
+ * Only the (single threaded) sync work touches the list, no locking is needed.
+ */
+#define SFE_CM_SHAPED_DEV_MAX	16
+static int sfe_cm_shaped_devs[SFE_CM_SHAPED_DEV_MAX];
+
+static void sfe_cm_shaped_dev_scan(void)
+{
+	int seen[SFE_CM_SHAPED_DEV_MAX];
+	int nseen = 0;
+	int i, j;
+
+	rcu_read_lock();
+	{
+		struct net_device *dev;
+
+		for_each_netdev_rcu(&init_net, dev) {
+			if (nseen == SFE_CM_SHAPED_DEV_MAX)
+				break;
+
+			if (sfe_dev_is_shaped(dev))
+				seen[nseen++] = dev->ifindex;
+		}
+	}
+	rcu_read_unlock();
+
+	for (i = 0; i < nseen; i++) {
+		struct net_device *dev;
+
+		for (j = 0; j < SFE_CM_SHAPED_DEV_MAX; j++) {
+			if (sfe_cm_shaped_devs[j] == seen[i])
+				break;
+		}
+
+		if (j != SFE_CM_SHAPED_DEV_MAX)
+			continue;
+
+		dev = dev_get_by_index(&init_net, seen[i]);
+		if (!dev)
+			continue;
+
+		pr_info("sfe_cm: %s now does traffic control, dropping its accelerated flows\n",
+			dev->name);
+		sfe_cm_flush_dev(dev);
+		dev_put(dev);
+	}
+
+	memset(sfe_cm_shaped_devs, 0, sizeof(sfe_cm_shaped_devs));
+	memcpy(sfe_cm_shaped_devs, seen, sizeof(int) * nseen);
+}
+
 static int sfe_cm_device_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct net_device *dev = SFE_DEV_EVENT_PTR(ptr);
@@ -1137,6 +1729,35 @@ static int __init sfe_cm_init(void)
 
 	pr_info("sfe_cm: Qualcomm Shortcut-FE v2 Connection Manager loading\n");
 
+	/*
+	 * A configured window needs conntrack accounting: the extension is added when
+	 * a conntrack entry is allocated, so it has to be on before the flows we want
+	 * to hold back are created.  Turn it on here (init scripts and users are not
+	 * relied upon) and remember the previous value for module exit.  Only flows
+	 * created from now on carry the extension - existing ones cannot be fixed up.
+	 */
+	if (sfe_cm_delay_pkts) {
+		if (!nf_ct_acct_enabled(&init_net)) {
+			sfe_cm_acct_prev = init_net.ct.sysctl_acct;
+			init_net.ct.sysctl_acct = 1;
+			pr_info("sfe_cm: enabled conntrack accounting for delay_pkts=%u\n",
+				sfe_cm_delay_pkts);
+		}
+
+		if (!nf_ct_acct_enabled(&init_net)) {
+			/* Cannot happen on supported kernels; refuse to pretend. */
+			pr_warn("sfe_cm: conntrack accounting unavailable, delay_pkts=%u is turned off\n",
+				sfe_cm_delay_pkts);
+			sfe_cm_delay_pkts = 0;
+		} else {
+			pr_info("sfe_cm: holding the first %u packets of every flow in the kernel stack\n",
+				sfe_cm_delay_pkts);
+		}
+	}
+
+	pr_info("sfe_cm: fast_xmit=%d udp_require_reply=%d\n",
+		sfe_cm_fast_xmit, sfe_cm_udp_require_reply);
+
 	sfe_cm_sync[0].is_v4 = true;
 	INIT_DELAYED_WORK(&sfe_cm_sync[0].dwork, sfe_cm_sync_work);
 
@@ -1145,14 +1766,16 @@ static int __init sfe_cm_init(void)
 	INIT_DELAYED_WORK(&sfe_cm_sync[1].dwork, sfe_cm_sync_work);
 #endif
 
-	sfe_v4_ctx = sfe_ipv4_notify_register(NULL, sfe_cm_v2_ipv4_sync_many_callback, NULL);
+	sfe_v4_ctx = sfe_ipv4_notify_register(sfe_cm_v2_ipv4_one_sync_callback,
+					      sfe_cm_v2_ipv4_sync_many_callback, NULL);
 	if (!sfe_v4_ctx) {
 		pr_err("sfe_cm: failed to register with SFE v2 IPv4 engine\n");
 		return -ENODEV;
 	}
 
 #ifdef SFE_SUPPORT_IPV6
-	sfe_v6_ctx = sfe_ipv6_notify_register(NULL, sfe_cm_v2_ipv6_sync_many_callback, NULL);
+	sfe_v6_ctx = sfe_ipv6_notify_register(sfe_cm_v2_ipv6_one_sync_callback,
+					      sfe_cm_v2_ipv6_sync_many_callback, NULL);
 	if (!sfe_v6_ctx) {
 		pr_warn("sfe_cm: failed to register with SFE v2 IPv6 engine\n");
 	}
@@ -1240,6 +1863,13 @@ static void __exit sfe_cm_exit(void)
 	if (sfe_v6_ctx)
 		sfe_ipv6_notify_unregister();
 #endif
+
+	/*
+	 * Only put accounting back if we are the ones who turned it on and nobody
+	 * changed it since.
+	 */
+	if (sfe_cm_acct_prev >= 0 && nf_ct_acct_enabled(&init_net))
+		init_net.ct.sysctl_acct = sfe_cm_acct_prev;
 
 	synchronize_rcu();
 }

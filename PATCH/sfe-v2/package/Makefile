@@ -16,6 +16,15 @@ PKG_MIRROR_HASH:=skip
 
 include $(INCLUDE_DIR)/package.mk
 
+#
+# NF_CONNTRACK_ACCT is a Kconfig symbol up to roughly kernel 6.7; from 6.8 the
+# accounting extension is compiled in unconditionally and is only controlled at
+# runtime by net.netfilter.nf_conntrack_acct, which /etc/init.d/shortcut-fe sets
+# before loading the connection manager.  The entry is kept so that older kernels
+# get the extension compiled in - the delay_pkts threshold needs it - and is
+# harmlessly ignored by newer ones.
+#
+
 define KernelPackage/shortcut-fe
   SECTION:=kernel
   CATEGORY:=Kernel modules
@@ -24,6 +33,7 @@ define KernelPackage/shortcut-fe
   DEPENDS:=@IPV6 +kmod-nf-conntrack
   FILES:=$(PKG_BUILD_DIR)/qca-nss-sfe.ko
   KCONFIG:= \
+	   CONFIG_NF_CONNTRACK_ACCT=y \
 	   CONFIG_NF_CONNTRACK_CHAIN_EVENTS=y \
 	   CONFIG_NF_CONNTRACK_EVENTS=y \
 	   CONFIG_NF_CONNTRACK_TIMEOUT=y \
@@ -54,6 +64,7 @@ define KernelPackage/shortcut-fe-cm
   DEPENDS:=+kmod-shortcut-fe
   FILES:=$(PKG_BUILD_DIR)/shortcut-fe-cm.ko
   KCONFIG:= \
+	   CONFIG_NF_CONNTRACK_ACCT=y \
 	   CONFIG_NF_CONNTRACK_CHAIN_EVENTS=y \
 	   CONFIG_NF_CONNTRACK_EVENTS=y \
 	   CONFIG_XFRM=y
