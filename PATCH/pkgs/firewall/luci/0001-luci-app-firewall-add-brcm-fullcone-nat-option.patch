@@ -9,15 +9,16 @@ Deliberately not wrapped in L.hasSystemFeature(): the switch has to be visible
 even when the kernel or nftables side is missing, so fw4's runtime probe can
 report the failure instead of the option silently not existing.
 
-Both are keyed on the section being edited; the earlier version of the family
-switches read and wrote a hardcoded '@zone[1]', so they silently applied to
-whichever zone happened to be second instead of the one on screen.
+Both are keyed on the section being edited; the family switches are shown
+only while the global switch is on, and IPv4 defaults to enabled.  The
+earlier version read and wrote a hardcoded '@zone[1]', so it silently
+applied to whichever zone happened to be second.
 
 Signed-off-by: YAOF-1 <dev@localhost>
 ---
 --- a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
 +++ b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
-@@ -53,6 +53,46 @@ return view.extend({
+@@ -53,6 +53,48 @@ return view.extend({
  			uci.unset('firewall', section_id, 'syn_flood');
  			uci.unset('firewall', section_id, 'synflood_protect');
  		};
@@ -44,11 +45,12 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +		o.value('1', _("Enable"));
 +		o.optional = false;
 +		o.load = function (section_id) {
-+			return (uci.get('firewall', section_id, 'fullcone4') === '1') ? '1' : '0';
++			return (uci.get('firewall', section_id, 'fullcone4') === '0') ? '0' : '1';
 +		};
 +		o.write = function(section_id, value) {
 +			uci.set('firewall', section_id, 'fullcone4', value === '1' ? '1' : '0');
 +		};
++		o.depends('fullcone', '1');
 +
 +		o = s.option(form.RichListValue, "fullcone6", _("BRCM Full Cone NAT6"));
 +		o.value('0', _("Disable"));
@@ -60,6 +62,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +		o.write = function(section_id, value) {
 +			uci.set('firewall', section_id, 'fullcone6', value === '1' ? '1' : '0');
 +		};
++		o.depends('fullcone', '1');
 +
  
  		o = s.option(form.Flag, 'drop_invalid', _('Drop invalid packets'));

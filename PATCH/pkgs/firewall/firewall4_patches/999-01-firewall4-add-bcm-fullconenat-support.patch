@@ -6,10 +6,10 @@ Full-cone NAT is provided by the Broadcom expectation-based scheme only:
 
   * nft_try_brcmfullcone() probes the kernel at runtime and disables the
     feature globally when the "masquerade brcmfullcone" statement is rejected
-  * zone.fullcone4 / zone.fullcone6 are the per-zone switches; IPv4 defaults
-    to on for the wan zone, IPv6 defaults to off because full cone NAT66 is
-    opt-in (it gives up address independence for the whole LAN)
-  * defaults.brcmfullcone is the single global switch
+  * defaults.fullcone4 / defaults.fullcone6 are the global family switches
+    (IPv4 on, IPv6 off); a zone may still override them explicitly
+  * nft_try_brcmfullcone(family) probes one family at a time, so a kernel
+    without IPv6 support no longer disables IPv4 as well
   * zone-brcmfullcone.uc emits the srcnat rule for each enabled family
 
 The nft-fullcone scheme (nft_try_fullcone, zone-fullcone.uc, defaults.fullcone,
@@ -21,11 +21,13 @@ Signed-off-by: YAOF-1 <dev@localhost>
 ---
 --- a/root/etc/config/firewall
 +++ b/root/etc/config/firewall
-@@ -5,6 +5,7 @@ config defaults
+@@ -5,6 +5,9 @@ config defaults
  	option forward		REJECT
  # Uncomment this line to disable ipv6 rules
  #	option disable_ipv6	1
 +	option brcmfullcone	0
++	option fullcone4	1
++	option fullcone6	0
  
  config zone
  	option name		lan
@@ -88,20 +90,20 @@ Signed-off-by: YAOF-1 <dev@localhost>
  }
  
  
-+function nft_try_brcmfullcone() {
++function nft_try_brcmfullcone(family) {
 +	let nft_test =
 +		'add table inet fw4-brcmfullcone-test; ' +
 +		'add chain inet fw4-brcmfullcone-test srcnat { ' +
-+			'type nat hook postrouting priority -100; policy accept; ' +
-+			'meta nfproto ipv4 masquerade brcmfullcone; ' +
-+			'meta nfproto ipv6 masquerade brcmfullcone; ' +
++			'type nat hook postrouting priority srcnat; policy accept; ' +
++			sprintf('meta nfproto %s masquerade brcmfullcone; ', family == 6 ? 'ipv6' : 'ipv4') +
 +		'}; ';
 +	let cmd = sprintf("/usr/sbin/nft -c '%s' 2>/dev/null", replace(nft_test, "'", "'\\''"));
-+	let ok = system(cmd) == 0;
-+	if (!ok) {
-+		warn("nft_try_brcmfullcone: cmd "+ cmd + "\n");
-+	}
-+	return ok;
++
++	if (system(cmd) == 0)
++		return true;
++
++	warn("nft_try_brcmfullcone: IPv" + (family == 6 ? "6" : "4") + " not supported\n");
++	return false;
 +}
 +
  return {
@@ -156,24 +158,28 @@ Signed-off-by: YAOF-1 <dev@localhost>
  			"accept",
  			"reject",
  			"drop"
-@@ -1946,6 +1992,7 @@ return {
+@@ -1946,6 +1992,9 @@ return {
  		}
  
  		let defs = this.parse_options(data, {
 +			brcmfullcone: [ "int", "0" ],
++			fullcone4: [ "bool", "1" ],
++			fullcone6: [ "bool", "0" ],
  			input: [ "policy", "drop" ],
  			output: [ "policy", "drop" ],
  			forward: [ "policy", "drop" ],
-@@ -1980,6 +2027,15 @@ return {
+@@ -1980,6 +2027,17 @@ return {
  
  		delete defs.syn_flood;
  
 +		if (defs.brcmfullcone == 1) {
-+			if (!nft_try_brcmfullcone()) {
++			if (!nft_try_brcmfullcone(4))
++				defs.fullcone4 = 0;
++			if (!nft_try_brcmfullcone(6))
++				defs.fullcone6 = 0;
++			if (!defs.fullcone4 && !defs.fullcone6) {
 +				delete defs.brcmfullcone;
-+				this.warn_section(data, "nft_try_brcmfullcone failed, disable fullcone globally");
-+			} else {
-+				this.myinfo_section(data, "nft_try_brcmfullcone success");
++				this.warn_section(data, "kernel has no BRCM full cone NAT support, disable fullcone globally");
 +			}
 +		}
 +
@@ -189,10 +195,17 @@ Signed-off-by: YAOF-1 <dev@localhost>
  
  			extra: [ "string", null, UNSUPPORTED ],
  			extra_src: [ "string", null, UNSUPPORTED ],
-@@ -2036,6 +2094,21 @@ return {
+@@ -2036,6 +2094,28 @@ return {
  			}
  		}
  
++		if (this.state.defaults) {
++			if (data.fullcone4 == null)
++				zone.fullcone4 = this.state.defaults.fullcone4 && zone.masq;
++			if (data.fullcone6 == null)
++				zone.fullcone6 = this.state.defaults.fullcone6 && zone.masq6;
++		}
++
 +		if (this.state.defaults && this.state.defaults.brcmfullcone != 1) {
 +			this.warn_section(data, "BRCM full cone NAT not enabled in defaults, ignoring zone settings");
 +			zone.fullcone4 = false;
