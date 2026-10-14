@@ -43,7 +43,7 @@ PATCH/sfe-v2/
   * 集成 `shortcut-fe-cm.o` 联合构建；
   * 引入 `-include $(src)/sfe_compat.h`，跨内核版本兼容垫片统一收敛于头文件处理。
 * **双模 Ingress 接收钩子**：
-  * 初始化时动态探测 `athrs_fast_nat_recv`。命中 953 补丁则在 L2 `netif_receive` 阶段接管数据包；未打补丁时自动回退至 Netfilter `NF_INET_PRE_ROUTING`（`NF_IP_PRI_FIRST` / `NF_IP6_PRI_FIRST`）。
+  * 初始化时动态探测 `athrs_fast_nat_recv`。命中 953 补丁则在 L2 `netif_receive` 阶段接管；未打补丁时优先挂 netdev ingress 钩子（`NFPROTO_NETDEV` / `NF_NETDEV_INGRESS`，位于 tc 之后、IP 栈之前），内核没有 `CONFIG_NETFILTER_INGRESS` 时再回退到 Netfilter `NF_INET_PRE_ROUTING`。
 * **数据面（sfe_ipv4_*.c / sfe_ipv6_*.c）**：
   * 移除 PPE 硬件虚表（`xmit_dev->offload_ops`）调用，转为软件直发。
 * **规则管理接口导出**：
@@ -57,13 +57,14 @@ PATCH/sfe-v2/
 ### 2.2 出向路径与 SQM / TC 动态自适应（`fast_xmit`）
 SFE 默认通过 `SFE_RULE_CREATE_FLAG_FLOW/RETURN_TRANSMIT_FAST` 绕过内核 Qdisc 队列调度层，直接调用网卡驱动 `ndo_start_xmit()` 发送，可显著提高转发吞吐并降低延迟。为兼容 SQM 流控与 TC 规则，当前版本实现动态自适应检测：
 
-* **默认 Qdisc 白名单**：
-  仅对无流控限制的队列直接直发：
-  * 内核内置 FIFO 与免排队队列（`noqueue`、`noop`、`pfifo`、`pfifo_fast`）；
-  * 多队列容器 `mq`（递归检查各子队列）；
-  * 系统默认分配的根队列（由 `net.core.default_qdisc` 指定，如单队列网卡默认的 `fq_codel`）。
-  显式配置的流控队列（如 `cake`、`htb`、`tbf`、`hfsc` 等）视为受控队列，不予绕过。
-* **TC 过滤器感知**：出向在**每包热路径**上判定（`sfe_dev_tx_is_shaped()`，`dev_fast_xmit()` 内），入向、以及引擎会在入向绕过的堆叠顶层设备由后台扫描判定（`sfe_dev_is_shaped()`），两者共用同一套"白名单式"队列判定（见 `sfe_compat.h`）。
+* **判据来自内核，不维护任何队列名单**：
+  能不能跳过某个队列由**队列自己声明**：`TCQ_F_CAN_BYPASS`（`pfifo`/`pfifo_fast`/`bfifo`、`codel`/`fq_codel`、`sfq` 按各自 limit 置位；`cake` 主动清除；`net/sched/cls_api.c` 在**任何 filter 挂到该队列时**清除它，因为 filter 必须看到每个包）；无 enqueue 的 `noqueue`/`noop` 本身无可跳过。
+  直发条件与内核 `__dev_xmit_skb()` 完全一致：**标志置位 且 队列为空**（`qdisc_qlen()`）——因此不会把包送过一个内核自己都不会跳过的整形器，也不可能让包越过仍在队列里的包（不引入乱序）。
+  * 每包判定落在**该包实际使用的那个 txq 的 qdisc** 上（`rcu_dereference(txq->qdisc)`）：`mq` 设备只有被挂 `cake` 的那个队列让路，其余队列照旧直发（不再靠名字识别 `mq`，多队列容器按 `TCQ_F_MQROOT` 结构判定）。
+  * 未自行声明的队列（`cake`、`htb`、`tbf`、`hfsc`、`netem`、`red`、`sfb`、`pie`/`fq_pie`、`dualpi2`、`fq`…）、以及**未知/第三方队列**一律保留在内核路径上——**判据缺失只损失直发，永不误跳过流控**；内核没有该标志时同样一律保留。
+  * 逃生口是内核标准动作：想让某个 qdisc 一定被尊重，给它挂任意一个 filter 即可（内核自动清除其 `TCQ_F_CAN_BYPASS`），SFE 侧零配置。
+* **TC 过滤器感知**：出向在**每包热路径**上判定（`dev_fast_xmit()` 内）；TCP/UDP 把"该队列是否可绕过"按方向缓存一次（`sfe_xmit_qdisc_state`，存于引擎的连接匹配结构），之后每包只校验 qdisc 指针与队列是否为空。入向、以及引擎会在入向绕过的堆叠顶层设备由后台扫描判定（`sfe_dev_is_shaped()` → `sfe_dev_has_shaping_qdisc()`）；两者共用同一套内核判据（见 `sfe_compat.h`）。
+* **GSO 包只影响自己**：GRO 之后成形的 GSO 包不能在这里重写，它单独走内核路径，但**不再**把该方向的 `FAST_XMIT` 永久清掉（后续非 GSO 包仍可直发）。
 * **双向独立决策**：分别评估入向与出向设备。若 WAN 口配置 SQM，上行流量清除 `TRANSMIT_FAST` 回退至内核 `dev_queue_xmit()` 正常排队；LAN 口无流控时，下行流量仍保持直发驱动。
 * **PPPoE 虚拟接口流控兼容（`pppoe_top_xmit`）**：
   当顶层接口（`pppoe-wan`）存在流控时：
@@ -97,13 +98,15 @@ SFE 快速路径转发绕过 Netfilter，连接管理器通过周期性工作队
 
 ### 2.7 数据面与语义边界
 * **TC / eBPF Ingress 兼容**：
-  若网卡挂载了 TC Ingress 程序（`tcx_ingress` / `miniq_ingress`），`sfe_recv` 主动返回 0 放行至内核执行 BPF 逻辑；未被 BPF 重定向的直连流量在后续 Netfilter `PREROUTING` 钩子中仍可被 SFE 捕获加速。
+  若网卡挂载了 TC Ingress 程序（`tcx_ingress` / `miniq_ingress`），`sfe_recv` 主动返回 0 放行至内核执行 BPF 逻辑；未被 BPF 重定向的直连流量在此后仍会被捕获加速：无 953 补丁的构建优先由 netdev ingress 钩子（`NFPROTO_NETDEV`，TC 之后、IP 栈之前）接管，内核缺少 `CONFIG_NETFILTER_INGRESS` 时回退 Netfilter `PREROUTING`。
 * **L2 目的 MAC 与 NAT 映射**：
   引擎仅重写双向目的 MAC 地址（出向 `conn_rule.return_mac`，入向 `conn_rule.flow_mac`），源 MAC 由出口网卡驱动补齐。DNAT 场景下精准映射到翻译后的内网目标 MAC，避免路由错误。
 * **UDP 双向确认（`udp_require_reply`）**：
   默认要求 conntrack 标记包含 `IPS_SEEN_REPLY_BIT`，单向 UDP 报文不建加速表，防止单包探测占用表项；若有单向 UDP 业务需求（如 Syslog），可置 `udp_require_reply=0`。
 * **连接容量扩展**：
   哈希表扩展至 16 位（65536 桶），单协议族上限 65536 条（IPv4/IPv6 合计 131072 条）。超出上限时平滑返回 `SFE_RET_MAX_CONN_COUNT_REACHED`，未加速流量继续走内核协议栈转发。
+* **经典 `tc filter`（`police`/`skbedit`/`fw` 等）**：
+  只要 filter 挂在某个 qdisc 上，内核就会清除该 qdisc 的 `TCQ_F_CAN_BYPASS`（`net/sched/cls_api.c`），SFE 随即不再直发该队列——**无需任何 SFE 侧配置**。
 
 ### 2.8 模块参数一览
 | 参数 | 默认 | 说明 |
@@ -142,12 +145,12 @@ Linux PPP 虚拟网卡为单队列且持有队列自旋锁（`ppp_xmit_lock`）�
 
 ### 钩子模式与转发路径
 * **打入 953 补丁（`CONFIG_SHORTCUT_FE=y`）**：在 L2 `netif_receive` 入口钩子拦截，上下行均可由 SFE 完整卸载。
-* **原生通用内核**：Netfilter `PRE_ROUTING` 钩子处理解封装后的 IP 报文，上行由 SFE 加速，下行由内核协议栈处理。
+* **原生通用内核（无 953）**：优先在 netdev ingress 钩子接管物理口上的原始 `ETH_P_PPP_SES` 帧（早于 ppp 解封装），上下行都可加速；只有内核缺少 `CONFIG_NETFILTER_INGRESS` 时才退回 `PRE_ROUTING`，此时看到的是 `pppoe-wan` 上的裸 IP，仅上行可加速。
 
-| 方向 | 原生内核 | `CONFIG_SHORTCUT_FE=y` |
+| 方向 | 无 953（netdev ingress / PRE_ROUTING） | 有 953 |
 | --- | --- | --- |
 | 上行 LAN→WAN | 直发物理网卡，绕开 PPP | 直发物理网卡，绕开 PPP |
-| 下行 WAN→LAN | 走内核慢路径 | SFE 解封装直发 LAN |
+| 下行 WAN→LAN | 有 netdev ingress 钩子时自己剥头进 LAN，否则走内核慢路径 | SFE 解封装直发 LAN |
 
 * **物理出口直发模式**（无流控）：
   SFE 自行处理 PPPoE 封装与解封装，直接调用物理网卡驱动发送，避开 PPP 队列与锁竞争。

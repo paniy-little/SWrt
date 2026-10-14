@@ -137,6 +137,7 @@ static inline u64 sfe_cm_get_pkt_count(struct nf_conn *ct)
  * table, it answers the batches the connection manager asks for.
  */
 #define SFE_CM_SYNC_INTERVAL_MS	1000
+#define SFE_CM_STATUS_DEV_MAX	8
 #define SFE_CM_SYNC_CHAIN_DELAY	1
 
 #ifdef SFE_SUPPORT_IPV6
@@ -233,17 +234,13 @@ static atomic64_t sfe_cm_stat_destroyed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_mark_pushed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_memo_added = ATOMIC64_INIT(0);
 
-/*
- * True when the engine may hand this device frames straight to the driver.  That
- * path skips the qdisc and the TC egress programs, so a device that carries
- * either keeps its packets on dev_queue_xmit() instead.
- */
+/* Admission only; the per packet check in dev_fast_xmit() decides. */
 static inline bool sfe_cm_dev_can_fast_xmit(struct net_device *dev)
 {
 	if (!sfe_cm_fast_xmit || !dev)
 		return false;
 
-	return !sfe_dev_tx_is_shaped(dev);
+	return sfe_dev_tx_may_bypass(dev);
 }
 
 /*
@@ -297,6 +294,29 @@ static int sfe_cm_status_get(char *buffer, const struct kernel_param *kp)
 
 	p += scnprintf(p, PAGE_SIZE - (p - buffer), "conntrack_acct=%d acct_enabled_by_us=%d\n",
 		       nf_ct_acct_enabled(&init_net) ? 1 : 0, sfe_cm_acct_prev >= 0);
+	p += scnprintf(p, PAGE_SIZE - (p - buffer), "qdisc=TCQ_F_CAN_BYPASS+Mqlen\n");
+
+	/* Which devices bypass their queue and which stay in the kernel path. */
+	{
+		struct net_device *dev;
+		int shown = 0;
+
+		rcu_read_lock();
+		for_each_netdev_rcu(&init_net, dev) {
+			if (shown == SFE_CM_STATUS_DEV_MAX)
+				break;
+			if (!(dev->flags & IFF_UP) || !rcu_access_pointer(dev->qdisc))
+				continue;
+
+			p += scnprintf(p, PAGE_SIZE - (p - buffer), "  %s: %s%s%s\n",
+				       dev->name,
+				       sfe_dev_tx_may_bypass(dev) ? "direct" : "queue",
+				       sfe_dev_has_tc_egress(dev) ? " tc-egress" : "",
+				       sfe_dev_has_tc_ingress(dev) ? " tc-ingress" : "");
+			shown++;
+		}
+		rcu_read_unlock();
+	}
 
 #if defined(SFE_SUPPORT_IPV6)
 	p += scnprintf(p, PAGE_SIZE - (p - buffer), "max_connections ipv4=%d ipv6=%d\n",
@@ -1146,22 +1166,16 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 		struct nf_conntrack_helper *helper = rcu_dereference(help->helper);
 
 		/*
-		 * A full-cone mapping is complete in conntrack and kept alive by a
-		 * permanent expectation, so accelerating it is safe.
-		 */
-		if (test_bit(IPS_FULLCONE_BIT, &ct->status))
-			goto accel;
-
-		/*
 		 * BCM-NAT/BCM-NAT6 only set up an expectation on the first packet and
-		 * never inspect payloads; any other ALG must keep seeing packets.
+		 * never inspect payloads, and the mapping is kept alive by a permanent
+		 * expectation, so these flows are safe to accelerate; any other ALG
+		 * must keep seeing every packet.
 		 */
 		if (!helper || (strcmp(helper->name, "BCM-NAT") != 0 &&
 				strcmp(helper->name, "BCM-NAT6") != 0))
 			return NF_ACCEPT;
 	}
 
-accel:
 
 	/*
 	 * A flow that was already refused is not examined again on every packet: the

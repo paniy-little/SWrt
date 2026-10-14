@@ -28,10 +28,10 @@ index 03fb87c..6dd1c20 100644
 +ccflags-y += -Wall -Wno-missing-prototypes -Wno-error -I$(src)/exports/ -I$(src) -include $(src)/sfe_compat.h
 +
 diff --git a/sfe.c b/sfe.c
-index 66c6187..f5698d7 100644
+index 66c6187..c437360 100644
 --- a/sfe.c
 +++ b/sfe.c
-@@ -39,7 +39,57 @@
+@@ -39,7 +39,87 @@
  
  extern int max_ipv4_conn;
  extern int max_ipv6_conn;
@@ -71,6 +71,36 @@ index 66c6187..f5698d7 100644
 +}
 +#endif
 +
++#if defined(CONFIG_NETFILTER_INGRESS)
++/*
++ * Runs after TC ingress and before the IP stack.  A PPPoE frame is still
++ * encapsulated on the physical device here, so the downstream direction can be
++ * taken without the QCA driver hook.
++ */
++static unsigned int sfe_netdev_ingress_hook(void *priv,
++					    struct sk_buff *skb,
++					    const struct nf_hook_state *state)
++{
++	if (unlikely(!skb->dev))
++		skb->dev = state->in;
++
++	if (sfe_recv_ext(skb, true))
++		return NF_STOLEN;
++
++	return NF_ACCEPT;
++}
++
++static const struct nf_hook_ops sfe_netdev_ingress_op = {
++	.hook = sfe_netdev_ingress_hook,
++	.pf = NFPROTO_NETDEV,
++	.hooknum = NF_NETDEV_INGRESS,
++	.priority = NF_IP_PRI_FIRST,
++};
++
++#endif
++
++static bool sfe_netdev_ingress_registered;
++
 +static const struct nf_hook_ops sfe_prerouting_ops[] = {
 +	{
 +		.hook = sfe_ipv4_pre_routing_hook,
@@ -90,7 +120,7 @@ index 66c6187..f5698d7 100644
  uint8_t sfe_fls_flush_on_hwm_enable;
  
  #define SFE_MESSAGE_VERSION 0x1
-@@ -2256,7 +2306,7 @@ EXPORT_SYMBOL(sfe_tun6rd_msg_init);
+@@ -2256,7 +2336,7 @@ EXPORT_SYMBOL(sfe_tun6rd_msg_init);
   *
   * Returns 1 if the packet is forwarded or 0 if it isn't.
   */
@@ -99,7 +129,7 @@ index 66c6187..f5698d7 100644
  {
  	struct net_device *dev;
  	struct sfe_l2_info l2_info = {};
-@@ -2271,25 +2321,19 @@ int sfe_recv(struct sk_buff *skb)
+@@ -2271,25 +2351,15 @@ int sfe_recv(struct sk_buff *skb)
  	 * - for IFB case it taken care by netif_recv_skb
  	 * - for simple filters on ingress tc_skip_classify would never be
  	 *   set and hence this check should be skipped.
@@ -110,37 +140,34 @@ index 66c6187..f5698d7 100644
  		/*
 -		 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
 -		 * We can not accelerate this packet.
-+		 * If ingress Qdisc or TC eBPF filter (dae, honk, einat, SQM) is
-+		 * configured, and packet has not been processed by TC ingress yet
-+		 * (!post_tc && !skb->tc_skip_classify): do not accelerate at L2
-+		 * netif_receive stage. Return 0 so it falls through to tc_run.
-+		 * Un-proxied / direct packets will be accelerated post-TC at the
-+		 * netfilter prerouting stage.
++		 * TC ingress is configured and the packet is not classified yet:
++		 * decline here so TC runs first, the post-TC hook takes it then.
  		 */
 -#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 -		if (rcu_access_pointer(dev->miniq_ingress) && !skb->tc_skip_classify) {
--			return 0;
--		}
--#else
--		struct bpf_mprog_entry *entry = rcu_dereference_bh(dev->tcx_ingress);
--		if (entry && rcu_access_pointer(tcx_entry(entry)->miniq) && !skb->tc_skip_classify) {
 +		if (!post_tc && sfe_dev_has_tc_ingress(dev) && !skb->tc_skip_classify) {
  			return 0;
  		}
+-#else
+-		struct bpf_mprog_entry *entry = rcu_dereference_bh(dev->tcx_ingress);
+-		if (entry && rcu_access_pointer(tcx_entry(entry)->miniq) && !skb->tc_skip_classify) {
+-			return 0;
+-		}
 -#endif
 -#endif
  	} else {
  		/*
  		 * Update Vlan l2 info by parsing vlan netdev
-@@ -2868,10 +2912,27 @@ int sfe_init_if(void)
+@@ -2868,10 +2938,42 @@ int sfe_init_if(void)
  	INIT_WORK(&sfe_ctx->work, sfe_process_response_msg);
  
  	/*
 -	 * Hook the receive path in the network stack.
-+	 * Always register netfilter prerouting hook.  This ensures packets
-+	 * on interfaces with TC ingress filters (dae, honk, einat, SQM)
-+	 * are accelerated at the prerouting hook after TC ingress has run.
-+	 */
++	 * Registered in both modes: with the driver hook it is the post-TC
++	 * second chance, without it the fallback ingress point.
+ 	 */
+-	BUG_ON(athrs_fast_nat_recv);
+-	RCU_INIT_POINTER(athrs_fast_nat_recv, sfe_recv);
 +	result = nf_register_net_hooks(&init_net, sfe_prerouting_ops, ARRAY_SIZE(sfe_prerouting_ops));
 +	if (result) {
 +		pr_err("sfe: failed to register netfilter hook: %d\n", result);
@@ -150,20 +177,34 @@ index 66c6187..f5698d7 100644
 +	/*
 +	 * The kernel provides athrs_fast_nat_recv (patch 953); hook it for the L2
 +	 * bypass.  Without it the netfilter hook stays as the ingress path.
- 	 */
--	BUG_ON(athrs_fast_nat_recv);
--	RCU_INIT_POINTER(athrs_fast_nat_recv, sfe_recv);
++	 */
 +	sfe_fast_nat_recv_p = (athrs_fast_nat_recv_fn_t *)__symbol_get("athrs_fast_nat_recv");
 +	if (sfe_fast_nat_recv_p) {
 +		RCU_INIT_POINTER(*sfe_fast_nat_recv_p, sfe_recv);
 +		pr_info("sfe: kernel fast_nat_recv hook activated (dual-mode with netfilter)\n");
 +	} else {
-+		pr_info("sfe: netfilter prerouting hook activated (generic kernel mode)\n");
++#if defined(CONFIG_NETFILTER_INGRESS)
++		/*
++		 * Earlier than prerouting (no ip_rcv, no netfilter chains) and
++		 * still after TC ingress; prerouting stays as the fallback.
++		 */
++		result = nf_register_net_hook(&init_net, &sfe_netdev_ingress_op);
++		if (result) {
++			pr_warn("sfe: netfilter ingress hook unavailable: %d\n", result);
++			result = 0;
++		} else {
++			sfe_netdev_ingress_registered = true;
++		}
++#endif
++		if (sfe_netdev_ingress_registered)
++			pr_info("sfe: netfilter ingress hook activated (post-TC, generic kernel mode)\n");
++		else
++			pr_info("sfe: netfilter prerouting hook activated (generic kernel mode)\n");
 +	}
  
  	return 0;
  exit2:
-@@ -2888,9 +2949,15 @@ void sfe_exit_if(void)
+@@ -2888,9 +2990,21 @@ void sfe_exit_if(void)
  	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
  
  	/*
@@ -177,6 +218,12 @@ index 66c6187..f5698d7 100644
 +		__symbol_put("athrs_fast_nat_recv");
 +		sfe_fast_nat_recv_p = NULL;
 +	}
++#if defined(CONFIG_NETFILTER_INGRESS)
++	if (sfe_netdev_ingress_registered) {
++		nf_unregister_net_hook(&init_net, &sfe_netdev_ingress_op);
++		sfe_netdev_ingress_registered = false;
++	}
++#endif
 +	nf_unregister_net_hooks(&init_net, sfe_prerouting_ops, ARRAY_SIZE(sfe_prerouting_ops));
  
  	sfe_pppoe_mgr_exit();
@@ -316,10 +363,19 @@ index 46421b6..abc1464 100644
   * sfe_ipv4_periodic_sync()
   */
 diff --git a/sfe_ipv4.h b/sfe_ipv4.h
-index 65b7fd8..498e6c7 100644
+index 65b7fd8..d360ee1 100644
 --- a/sfe_ipv4.h
 +++ b/sfe_ipv4.h
-@@ -341,7 +341,7 @@ struct sfe_ipv4_connection {
+@@ -164,6 +164,8 @@ struct sfe_ipv4_connection_match {
+ 					/* Source MAC address to use when forwarding */
+ 	struct net_device *xmit_dev;	/* Network device on which to transmit */
+ 	struct net_device *qdisc_xmit_dev;      /* Interface used for fast qdisc xmit */
++	struct sfe_xmit_qdisc_state xmit_qdisc;
++					/* Cached queue discipline verdict, see sfe_compat.h */
+ 
+ 	/*
+ 	 * xmit device's feature
+@@ -341,7 +343,7 @@ struct sfe_ipv4_connection {
  /*
   * IPv4 connections and hash table size information.
   */
@@ -329,7 +385,7 @@ index 65b7fd8..498e6c7 100644
  #define SFE_IPV4_CONNECTION_HASH_MASK (SFE_IPV4_CONNECTION_HASH_SIZE - 1)
  
 diff --git a/sfe_ipv4_tcp.c b/sfe_ipv4_tcp.c
-index 55769af..524cd9f 100644
+index 55769af..438e504 100644
 --- a/sfe_ipv4_tcp.c
 +++ b/sfe_ipv4_tcp.c
 @@ -163,8 +163,6 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
@@ -372,8 +428,29 @@ index 55769af..524cd9f 100644
  	rcu_read_unlock();
  
  	/*
+@@ -966,15 +947,16 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 	 * packet.
+ 	 */
+ 	if (likely(fast_xmit)) {
++		/*
++		 * A GSO skb cannot be rewritten here, so it alone takes the kernel
++		 * path; the flag stays set for the packets that can.
++		 */
+ 		if (likely(!skb_is_gso(skb))) {
+ 			mem_debug_update_skb(skb);
+-			if (likely(dev_fast_xmit(skb, xmit_dev, features))) {
++			if (likely(dev_fast_xmit_state(skb, xmit_dev, features, &cm->xmit_qdisc))) {
+ 				this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+ 				return 1;
+ 			}
+-		} else {
+-			cm->flags &= ~SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT;
+-			DEBUG_TRACE("%px: fast xmit disabled for xmit dev %s", skb, xmit_dev->name);
+ 		}
+ 	}
+ 
 diff --git a/sfe_ipv4_udp.c b/sfe_ipv4_udp.c
-index baedc0f..f071626 100644
+index baedc0f..f92c5b0 100644
 --- a/sfe_ipv4_udp.c
 +++ b/sfe_ipv4_udp.c
 @@ -169,8 +169,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
@@ -438,6 +515,15 @@ index baedc0f..f071626 100644
  	rcu_read_unlock();
  
  	/*
+@@ -813,7 +788,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
+ 	 * packet.
+ 	 */
+ 	mem_debug_update_skb(skb);
+-	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
++	if (likely(fast_xmit && dev_fast_xmit_state(skb, xmit_dev, features, &cm->xmit_qdisc))) {
+ 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+ 		return 1;
+ 	}
 diff --git a/sfe_ipv6.c b/sfe_ipv6.c
 index 3dadf70..caee5ea 100644
 --- a/sfe_ipv6.c
@@ -560,10 +646,19 @@ index 3dadf70..caee5ea 100644
   * sfe_ipv6_periodic_sync()
   */
 diff --git a/sfe_ipv6.h b/sfe_ipv6.h
-index c87783c..49e972b 100644
+index c87783c..bf931b0 100644
 --- a/sfe_ipv6.h
 +++ b/sfe_ipv6.h
-@@ -354,7 +354,7 @@ struct sfe_ipv6_connection {
+@@ -187,6 +187,8 @@ struct sfe_ipv6_connection_match {
+ 	 */
+ 	struct net_device *xmit_dev;	/* Network device on which to transmit */
+ 	struct net_device *qdisc_xmit_dev;      /* Interface used for fast qdisc xmit */
++	struct sfe_xmit_qdisc_state xmit_qdisc;
++					/* Cached queue discipline verdict, see sfe_compat.h */
+ 
+ 	/*
+ 	 * xmit device's feature
+@@ -354,7 +356,7 @@ struct sfe_ipv6_connection {
  /*
   * IPv6 connections and hash table size information.
   */
@@ -573,7 +668,7 @@ index c87783c..49e972b 100644
  #define SFE_IPV6_CONNECTION_HASH_MASK (SFE_IPV6_CONNECTION_HASH_SIZE - 1)
  
 diff --git a/sfe_ipv6_tcp.c b/sfe_ipv6_tcp.c
-index 5592475..a55f02f 100644
+index 5592475..e5d6a0a 100644
 --- a/sfe_ipv6_tcp.c
 +++ b/sfe_ipv6_tcp.c
 @@ -132,8 +132,6 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
@@ -612,8 +707,29 @@ index 5592475..a55f02f 100644
  	rcu_read_unlock();
  
  	/*
+@@ -931,15 +912,16 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ 	 * packet.
+ 	 */
+ 	if (likely(fast_xmit)) {
++		/*
++		 * A GSO skb cannot be rewritten here, so it alone takes the kernel
++		 * path; the flag stays set for the packets that can.
++		 */
+ 		if (likely(!skb_is_gso(skb))) {
+ 			mem_debug_update_skb(skb);
+-			if (likely(dev_fast_xmit(skb, xmit_dev, features))) {
++			if (likely(dev_fast_xmit_state(skb, xmit_dev, features, &cm->xmit_qdisc))) {
+ 				this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+ 				return 1;
+ 			}
+-		} else {
+-			cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT;
+-			DEBUG_TRACE("%px: fast xmit disabled for xmit dev %s", skb, xmit_dev->name);
+ 		}
+ 	}
+ 
 diff --git a/sfe_ipv6_udp.c b/sfe_ipv6_udp.c
-index d4df982..4ab0045 100644
+index d4df982..0cb40b3 100644
 --- a/sfe_ipv6_udp.c
 +++ b/sfe_ipv6_udp.c
 @@ -154,8 +154,6 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
@@ -674,3 +790,12 @@ index d4df982..4ab0045 100644
  	rcu_read_unlock();
  
  	/*
+@@ -790,7 +765,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
+ 	 * packet.
+ 	 */
+ 	mem_debug_update_skb(skb);
+-	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
++	if (likely(fast_xmit && dev_fast_xmit_state(skb, xmit_dev, features, &cm->xmit_qdisc))) {
+ 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+ 		return 1;
+ 	}
