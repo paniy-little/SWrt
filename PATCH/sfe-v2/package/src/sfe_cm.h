@@ -51,10 +51,9 @@ struct sfe_connection_create {
 	__be16 dest_port;
 	__be16 dest_port_xlate;
 	/*
-	 * src_mac: MAC of the flow's source as seen from the router, written when
-	 * sending in the return direction.
-	 * dest_mac_xlate: MAC of the flow's destination *after* translation, written
-	 * when sending in the flow direction (see sfe_cm_v2_ipv4_create_rule()).
+	 * src_mac: source MAC as seen from the router, used in the return
+	 * direction.  dest_mac_xlate: destination MAC after translation, used in the
+	 * flow direction (see sfe_cm_v2_ipv4_create_rule()).
 	 */
 	u8 src_mac[ETH_ALEN];
 	u8 dest_mac_xlate[ETH_ALEN];
@@ -67,10 +66,8 @@ struct sfe_connection_create {
 	u32 dest_td_end;
 	u32 dest_td_max_end;
 	/*
-	 * Connection mark of the conntrack entry at offload time, and the DSCP the
-	 * flow was classified with (0 when DSCP remarking is off/unset).  Both are
-	 * pushed into the rule so that the fast path keeps what the stack would have
-	 * applied.
+	 * Connection mark and DSCP at offload time, pushed into the rule so the fast
+	 * path keeps what the stack would have applied.
 	 */
 	u32 mark;
 	u8 dscp;
@@ -83,10 +80,8 @@ struct sfe_connection_create {
 	bool flow_is_pppoe;
 	bool return_is_pppoe;
 	/*
-	 * Set when a stacked side is kept on its top device (pppoe-wan) instead of
-	 * the bottom one: the kernel stack does the PPPoE encapsulation, so the
-	 * engine must not do any L2 work for that side - and traffic control on the
-	 * top device is honoured because the frames really go through it.
+	 * Set when a stacked side stays on its top device (pppoe-wan): the kernel does
+	 * the PPPoE encapsulation there, so the engine must not do L2 work for it.
 	 */
 	bool flow_top_xmit;
 	bool return_top_xmit;

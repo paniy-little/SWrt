@@ -52,6 +52,8 @@ PATCH/sfe-v2/
 * **PPPoE 设备分层识别**：
   * 连接管理器通过 `dev_fill_forward_path()` 识别底层物理网卡与顶层虚拟接口（`pppoe-wan`），并设置 `SFE_RULE_CREATE_FLAG_USE_FLOW/RETURN_BOTTOM_INTERFACE`。
 
+> **本次变更（待提交）**：`sfe_cm_shaped_dev_scan()` 的判据仍为 `sfe_dev_is_shaped()`，即入向与出向都参与判定；曾短暂改为 `sfe_dev_tx_is_shaped()`，但那会让"flow 建立之后才在入向挂上 TC 程序的设备"永远不被扫描到（`sfe_cm_bypass_refused()` 处理的是引擎在入向绕过的堆叠顶层设备），从而永久绕过其入向流控，已回退。
+
 ### 2.2 出向路径与 SQM / TC 动态自适应（`fast_xmit`）
 SFE 默认通过 `SFE_RULE_CREATE_FLAG_FLOW/RETURN_TRANSMIT_FAST` 绕过内核 Qdisc 队列调度层，直接调用网卡驱动 `ndo_start_xmit()` 发送，可显著提高转发吞吐并降低延迟。为兼容 SQM 流控与 TC 规则，当前版本实现动态自适应检测：
 
@@ -61,14 +63,14 @@ SFE 默认通过 `SFE_RULE_CREATE_FLAG_FLOW/RETURN_TRANSMIT_FAST` 绕过内核 Q
   * 多队列容器 `mq`（递归检查各子队列）；
   * 系统默认分配的根队列（由 `net.core.default_qdisc` 指定，如单队列网卡默认的 `fq_codel`）。
   显式配置的流控队列（如 `cake`、`htb`、`tbf`、`hfsc` 等）视为受控队列，不予绕过。
-* **TC 过滤器感知**：检测网卡是否存在 TC egress/ingress 或 `clsact` Qdisc，存在控制程序时自动禁用直发。
+* **TC 过滤器感知**：出向在**每包热路径**上判定（`sfe_dev_tx_is_shaped()`，`dev_fast_xmit()` 内），入向、以及引擎会在入向绕过的堆叠顶层设备由后台扫描判定（`sfe_dev_is_shaped()`），两者共用同一套"白名单式"队列判定（见 `sfe_compat.h`）。
 * **双向独立决策**：分别评估入向与出向设备。若 WAN 口配置 SQM，上行流量清除 `TRANSMIT_FAST` 回退至内核 `dev_queue_xmit()` 正常排队；LAN 口无流控时，下行流量仍保持直发驱动。
 * **PPPoE 虚拟接口流控兼容（`pppoe_top_xmit`）**：
   当顶层接口（`pppoe-wan`）存在流控时：
   * `pppoe_top_xmit=1`（默认）：改由顶层接口发包。SFE 仅加速 IP 转发，PPPoE 报头封装与排队调度交由内核 PPP 驱动处理，兼顾转发性能与流量控制；
   * `pppoe_top_xmit=0`：对该类连接不予加速，交由内核协议栈标准转发。
 * **运行时状态追踪与平滑降级**：
-  * 发包路径在 RCU 读临界区内实时检查流控状态，若网卡新增流控即时降级为 `dev_queue_xmit()`；
+  * 发包路径在 RCU 读临界区内实时检查**出向**流控状态，若网卡新增出向流控即时降级为 `dev_queue_xmit()`；
   * 后台任务定期扫描设备状态，对新增流控的设备主动调用 `sfe_destroy_all_rules_for_dev()` 清理规则，使存量连接平滑回退至内核协议栈。
 * **全局开关**：设置模块参数 `fast_xmit=0` 可全局强制统一走 `dev_queue_xmit()`。
 

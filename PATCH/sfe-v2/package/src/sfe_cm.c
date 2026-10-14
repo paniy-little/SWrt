@@ -131,21 +131,10 @@ static inline u64 sfe_cm_get_pkt_count(struct nf_conn *ct)
 }
 
 /*
- * Periodic connection synchronisation.
- *
- * SFE v2 never walks its connection table on its own: the connection manager
- * asks for a batch and the engine answers asynchronously through the many-sync
- * callback.  We have to drive that loop, because the fast path never touches
- * conntrack:
- *   1. every accelerated flow keeps its conntrack entry (and therefore its
- *      timeout) alive instead of being kicked back to the slow path halfway
- *      through,
- *   2. the conntrack packet/byte counters stay meaningful for accounting.
- *
- * A round is (re)started every SFE_CM_SYNC_INTERVAL_MS.  Whenever the engine
- * reports connections left to sync (many->next != 0) the next batch is queued
- * SFE_CM_SYNC_CHAIN_DELAY jiffies later, so a full walk of even a maximum sized
- * (4096 entries) table finishes in about a second at a fixed, tiny CPU cost.
+ * The fast path never touches conntrack, so an accelerated flow would time out of
+ * the conntrack table and its counters would stop moving.  Drive the engine batch
+ * synchronisation from here to keep both alive: the engine never walks its own
+ * table, it answers the batches the connection manager asks for.
  */
 #define SFE_CM_SYNC_INTERVAL_MS	1000
 #define SFE_CM_SYNC_CHAIN_DELAY	1
@@ -180,20 +169,18 @@ static struct sfe_ctx_instance *sfe_v6_ctx;
 
 /*
  * Module parameters:
- * - delay_pkts (default: 8): Number of initial packets to leave in the Linux
- *   stack before offloading.  Gives transparent proxies (dae, honk, Clash,
- *   sing-box) and DPI a window to inspect the flow (TLS SNI, HTTP Host, QUIC
- *   Initial), and keeps short lived flows (DNS, NTP, port scans) out of the
- *   table.  Needs conntrack accounting, see sfe_cm_init().
- * - fast_xmit (default: true): Allow handing frames straight to the driver.  A
- *   device is only bypassed when its egress path has nothing but a trivial queue
- *   (see sfe_compat.h): a qdisc somebody configured, a TC program or an mq child
- *   keeps the packets on dev_queue_xmit().
- * - udp_require_reply (default: true): Only offload a UDP flow once a reply was
- *   seen; set to 0 to also accelerate genuinely unidirectional UDP flows.
- * - pppoe_top_xmit (default: true): Keep a PPPoE flow accelerated through
- *   pppoe-wan when that device does traffic control (the kernel then does the
- *   PPPoE encapsulation); 0 refuses such flows instead.
+ * - delay_pkts: packets to leave in the stack before a flow is offloaded, so that
+ *   proxies and DPI can inspect and claim it and short lived flows never enter
+ *   the connection table.  Needs conntrack accounting, see sfe_cm_init().
+ * - fast_xmit: hand frames straight to the driver.  A device whose egress path
+ *   carries a qdisc or TC programs keeps its packets on dev_queue_xmit() instead
+ *   (see sfe_compat.h).
+ * - udp_require_reply: only offload a UDP flow that has already seen a reply, so
+ *   one-way UDP (syslog, SNMP traps, RTP/IPTV) is not taken over prematurely.
+ * - pppoe_top_xmit: keep a PPPoE side on the top device when it has traffic
+ *   control, so pppoe-wan queue and TC programs stay in the path; 0 refuses such
+ *   flows instead of moving them.
+ * - dscp_remark, src_iface_check, tcp_no_seq_check: optional rule inputs.
  */
 static unsigned int sfe_cm_delay_pkts = 8;
 module_param_named(delay_pkts, sfe_cm_delay_pkts, uint, 0644);
@@ -230,13 +217,8 @@ MODULE_PARM_DESC(tcp_no_seq_check, "Skip the engine's TCP sequence and window va
 
 /*
  * delay_pkts counts packets through the conntrack accounting extension, so the
- * window cannot work without accounting.  Rather than making every user wire up
- * the sysctl - and rather than silently ignoring the window when it is missing -
- * the connection manager turns accounting on itself when a window is configured
- * and puts the previous setting back when it is unloaded.  With delay_pkts=0
- * nothing is touched and nothing is paid for.
- *
- * -1: we did not change it.
+ * window cannot work without it.  Turn it on for as long as the module is loaded
+ * and put the previous setting back on unload.  -1: not changed by this module.
  */
 static int sfe_cm_acct_prev = -1;
 
@@ -252,12 +234,9 @@ static atomic64_t sfe_cm_stat_mark_pushed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_memo_added = ATOMIC64_INIT(0);
 
 /*
- * May SFE hand this device's frames straight to the driver?
- *
- * Only egress traffic control matters here: the packet is on its way out, so a
- * qdisc or a TC egress program means it has to go through dev_queue_xmit()
- * instead.  See sfe_compat.h for how "traffic control" is decided - an allowlist
- * of trivial queues, not a list of shaper names.
+ * True when the engine may hand this device frames straight to the driver.  That
+ * path skips the qdisc and the TC egress programs, so a device that carries
+ * either keeps its packets on dev_queue_xmit() instead.
  */
 static inline bool sfe_cm_dev_can_fast_xmit(struct net_device *dev)
 {
@@ -268,20 +247,10 @@ static inline bool sfe_cm_dev_can_fast_xmit(struct net_device *dev)
 }
 
 /*
- * PPPoE: send on the bottom device or through the top one?
- *
- * The engine can write and strip the PPPoE header itself and hand the frame to
- * the bottom device (eth0), which is what makes PPPoE forwarding fast.  It
- * cannot honour traffic control attached to the top device (pppoe-wan) in that
- * mode, because neither pppoe-wan's queue nor its TC programs are on the path.
- *
- * When the top device does have traffic control, a side is therefore kept on the
- * top device instead: the engine matches and transmits plain IP frames, the ppp
- * stack writes and strips the PPPoE header as usual, and pppoe-wan's qdisc and
- * TC programs run.  Routing, conntrack and netfilter are still skipped; the cost
- * is that the PPPoE part stays in the kernel stack.
- *
- * pppoe_top_xmit=0 disables that and refuses such flows instead (see below).
+ * PPPoE: the engine can write and strip the PPPoE header itself and send on the
+ * bottom device, which skips the ppp queue.  It cannot honour traffic control
+ * attached to the top device (pppoe-wan) in that mode, because neither its queue
+ * nor its TC programs are on the path, so such a side is kept on the top device.
  */
 static inline bool sfe_cm_pppoe_use_top(struct net_device *top_dev)
 {
@@ -289,11 +258,9 @@ static inline bool sfe_cm_pppoe_use_top(struct net_device *top_dev)
 }
 
 /*
- * A stacked side the engine would have to bypass must not be doing traffic
- * control.  sfe_cm_pppoe_use_top() already resolves that case by keeping the top
- * device as the interface; what is left here is the pppoe_top_xmit=0 fallback,
- * where the flow is refused instead - the packets then take the ordinary kernel
- * path, qdisc and TC included.
+ * Fallback for pppoe_top_xmit=0: instead of moving the side to the top device,
+ * refuse a side whose bypassed top device has traffic control, so its packets
+ * take the ordinary kernel path with qdisc and TC included.
  */
 static struct net_device *sfe_cm_bypass_refused(struct sfe_connection_create *sic)
 {
@@ -366,13 +333,10 @@ static inline u8 sfe_cm_skb_dscp(struct sk_buff *skb, bool is_v4)
 }
 
 /*
- * Flows that were refused acceleration keep walking through post-routing, so
- * remember their conntrack entry in a small per-CPU ring: without it every
- * packet of such a flow would pay for the route and neighbour lookups again.
- * Entries are dropped when the conntrack entry dies.
- *
- * The test/add side runs from the packet hook; get_cpu_ptr()/put_cpu_ptr() keep
- * the per-CPU access valid whatever context that hook runs in.
+ * A flow that was refused acceleration keeps walking through post-routing, so its
+ * route and neighbour lookups would be repeated for every packet.  Remember the
+ * conntrack entry in a per-CPU ring to skip that work; entries are dropped when
+ * the conntrack entry dies.
  */
 #define SFE_CM_NO_ACCEL_SLOTS	32
 struct sfe_cm_no_accel_ring {
@@ -439,8 +403,8 @@ static void sfe_cm_sync_work(struct work_struct *work);
 static void sfe_cm_shaped_dev_scan(void);
 
 /*
- * Vanilla kernels have a single conntrack event notifier slot.  We take it over
- * and re-claim it from the periodic work in case somebody registers later.
+ * Vanilla kernels have a single conntrack event notifier slot; it is taken over
+ * here and re-claimed from the periodic work, in case somebody registers later.
  */
 static void sfe_cm_conntrack_notifier_reclaim(void);
 
@@ -468,10 +432,8 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 
 	msg.msg.rule_create.valid_flags = SFE_RULE_CREATE_CONN_VALID;
 	/*
-	 * Decide fast transmission independently for each egress direction:
-	 * dest_dev is the flow egress (the engine's original_cm->xmit_dev) and
-	 * src_dev the return egress.  An egress device with a configured qdisc or a
-	 * TC program keeps its packets on dev_queue_xmit() instead.
+	 * Fast transmit is decided per egress direction (dest_dev is the flow egress,
+	 * src_dev the return egress), so a shaped side does not disable the other one.
 	 */
 	msg.msg.rule_create.rule_flags = SFE_RULE_CREATE_FLAG_ROUTED;
 	if (sfe_cm_dev_can_fast_xmit(sic->dest_dev))
@@ -480,21 +442,19 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
 
 	/*
-	 * Optional: have the engine verify that packets arrive on the device the
-	 * flow was built for.  The no-flush variant is used on purpose - a mismatch
-	 * only hands the packet to the stack.  That also keeps bridged LAN traffic
-	 * working, where the L2 hook sees the bridge port while the rule was built
-	 * for the bridge device; the packet is then taken by the prerouting hook.
+	 * Optional: let the engine check that packets arrive on the device the rule
+	 * was built for.  The no-flush variant is used so a mismatch only hands the
+	 * packet to the stack; that keeps bridged LAN traffic working, where the L2
+	 * hook sees the bridge port while the rule was built for the bridge device.
 	 */
 	if (sfe_cm_src_iface_check)
 		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH |
 						  SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH;
 
 	/*
-	 * A PPPoE side consists of two devices: the bottom one (the real
-	 * ingress/egress device SFE decapsulates from / encapsulates into) and
-	 * the top one (the pppoe-wan netdev).  Tell the engine which sides have
-	 * to be matched and transmitted on the bottom interface.
+	 * A PPPoE side consists of two devices: the bottom one the engine
+	 * decapsulates from and encapsulates into, and the top one (pppoe-wan) the
+	 * stack routes through.  Tell the engine which sides use the bottom device.
 	 */
 	if (sic->flow_is_pppoe)
 		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE;
@@ -523,13 +483,11 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 
 	memcpy(msg.msg.rule_create.conn_rule.flow_mac, sic->src_mac, ETH_ALEN);
 	/*
-	 * return_mac is the address the engine writes when it sends in the flow
-	 * direction, i.e. towards the flow's destination *after* translation, so it
-	 * has to come from the translated destination (dest_ip_xlate).  Using the
-	 * pre-NAT destination here breaks every DNAT'ed flow: for a forwarded port
-	 * the untranslated destination is the router's own WAN address, whose
-	 * neighbour entry resolves to the loopback device and therefore to an
-	 * all-zero MAC.
+	 * return_mac is written when sending in the flow direction, i.e. towards the
+	 * destination after translation, so it has to come from dest_ip_xlate.  Using
+	 * the pre-NAT destination breaks DNAT flows: for a forwarded port that is the
+	 * router's own WAN address, whose neighbour entry resolves to the loopback
+	 * device and an all-zero MAC.
 	 */
 	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac_xlate, ETH_ALEN);
 
@@ -568,10 +526,9 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 	}
 
 	/*
-	 * Carry the connection mark into the fast path: the engine then writes it
-	 * into skb->mark, which is what the qdisc (tc fw filters, cake tins) and any
-	 * later consumer see.  Without this, mark based policy is silently lost for
-	 * every accelerated flow.  Only flows that actually carry a mark pay for it.
+	 * Carry the connection mark into the fast path so the qdisc (tc fw filters,
+	 * cake tins) and later consumers still see it; without this, mark based policy
+	 * is lost for every accelerated flow.
 	 */
 	if (sic->mark) {
 		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_MARK_VALID;
@@ -642,11 +599,10 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST;
 
 	/*
-	 * Optional: have the engine verify that packets arrive on the device the
-	 * flow was built for.  The no-flush variant is used on purpose - a mismatch
-	 * only hands the packet to the stack.  That also keeps bridged LAN traffic
-	 * working, where the L2 hook sees the bridge port while the rule was built
-	 * for the bridge device; the packet is then taken by the prerouting hook.
+	 * Optional: let the engine check that packets arrive on the device the rule
+	 * was built for.  The no-flush variant is used so a mismatch only hands the
+	 * packet to the stack; that keeps bridged LAN traffic working, where the L2
+	 * hook sees the bridge port while the rule was built for the bridge device.
 	 */
 	if (sfe_cm_src_iface_check)
 		msg.msg.rule_create.rule_flags |= SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH |
@@ -680,13 +636,11 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 
 	memcpy(msg.msg.rule_create.conn_rule.flow_mac, sic->src_mac, ETH_ALEN);
 	/*
-	 * return_mac is the address the engine writes when it sends in the flow
-	 * direction, i.e. towards the flow's destination *after* translation, so it
-	 * has to come from the translated destination (dest_ip_xlate).  Using the
-	 * pre-NAT destination here breaks every DNAT'ed flow: for a forwarded port
-	 * the untranslated destination is the router's own WAN address, whose
-	 * neighbour entry resolves to the loopback device and therefore to an
-	 * all-zero MAC.
+	 * return_mac is written when sending in the flow direction, i.e. towards the
+	 * destination after translation, so it has to come from dest_ip_xlate.  Using
+	 * the pre-NAT destination breaks DNAT flows: for a forwarded port that is the
+	 * router's own WAN address, whose neighbour entry resolves to the loopback
+	 * device and an all-zero MAC.
 	 */
 	memcpy(msg.msg.rule_create.conn_rule.return_mac, sic->dest_mac_xlate, ETH_ALEN);
 
@@ -726,10 +680,9 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 	}
 
 	/*
-	 * Carry the connection mark into the fast path: the engine then writes it
-	 * into skb->mark, which is what the qdisc (tc fw filters, cake tins) and any
-	 * later consumer see.  Without this, mark based policy is silently lost for
-	 * every accelerated flow.  Only flows that actually carry a mark pay for it.
+	 * Carry the connection mark into the fast path so the qdisc (tc fw filters,
+	 * cake tins) and later consumers still see it; without this, mark based policy
+	 * is lost for every accelerated flow.
 	 */
 	if (sic->mark) {
 		msg.msg.rule_create.valid_flags |= SFE_RULE_CREATE_MARK_VALID;
@@ -822,17 +775,13 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 						struct net_device *pppoe_dev = (struct net_device *)path->dev;
 
 						/*
-						 * This hop describes the PPPoE netdev the stack
-						 * routes through (pppoe-wan); the device the
-						 * encapsulated frame has to leave through is the
-						 * bottom device of the stack (eth0/eth0.x), which
-						 * dev_fill_forward_path() appends as the last hop.
-						 *
-						 * SFE writes the L2 and PPPoE headers itself, so the
-						 * bottom device has to be its interface - handing an
-						 * encapsulated frame to the PPPoE netdev would make
-						 * the ppp channel encapsulate it a second time.  The
-						 * PPPoE netdev is passed along as the top interface.
+						 * dev_fill_forward_path() lists the PPPoE netdev (pppoe-wan)
+						 * the stack routes through first and the device the frame
+						 * leaves through last (eth0/eth0.x).  SFE writes the L2 and
+						 * PPPoE headers itself, so the bottom device has to be its
+						 * interface - handing the frame to the PPPoE netdev would
+						 * encapsulate it a second time.  The PPPoE netdev is passed
+						 * along as the top interface.
 						 */
 						mac_dev = (struct net_device *)stack.path[stack.num_paths - 1].dev;
 						if (unlikely(!mac_dev))
@@ -1011,10 +960,10 @@ static void sfe_cm_v2_ipv4_sync_many_callback(void *app_data, struct sfe_ipv4_ms
 }
 
 /*
- * A single rule the engine flushed or evicted on its own (a packet it could not
- * handle, an eviction under pressure, a failed check) is reported here.  Nobody
- * listened before, so such a flow silently vanished from the fast path while the
- * connection manager kept believing it was accelerated.
+ * The engine reports a rule it dropped on its own here (a packet it could not
+ * handle, an eviction under pressure, a failed check).  Without this the flow
+ * would vanish from the fast path while the connection manager still
+ * treated it as accelerated.
  */
 static void sfe_cm_v2_ipv4_one_sync_callback(void *app_data, struct sfe_ipv4_msg *msg)
 {
@@ -1085,10 +1034,8 @@ static void sfe_cm_v2_ipv6_one_sync_callback(void *app_data, struct sfe_ipv6_msg
 
 /*
  * sfe_cm_sync_request()
- *	Ask the engine for one batch of connection statistics.
- *
- * The engine answers through sfe_cm_v2_ipvX_sync_many_callback(), which runs in
- * workqueue context, so this is a cheap hand-off and not a walk of our own.
+ *	Ask the engine for one batch of connection statistics; the answer arrives
+ *	asynchronously through the sync_many callback.
  */
 static void sfe_cm_sync_request(bool is_v4)
 {
@@ -1129,16 +1076,14 @@ static void sfe_cm_sync_work(struct work_struct *work)
 	struct sfe_cm_sync *sync = container_of(work, struct sfe_cm_sync, dwork.work);
 
 	/*
-	 * Make sure we still own the conntrack event notifier (vanilla kernels
+	 * Re-claim the conntrack event notifier slot (vanilla kernels
 	 * only, a no-op otherwise).
 	 */
 	sfe_cm_conntrack_notifier_reclaim();
 
 	/*
-	 * Devices can gain traffic control at any time.  The connection table is the
-	 * only place that knows about flows which were built before that, so this is
-	 * where they have to be dropped again.  One family is enough: the scan walks
-	 * all devices and drops their IPv4 as well as their IPv6 flows.
+	 * A device that gains traffic control invalidates the rules built for it
+	 * earlier; drop them so they are rebuilt with the new egress state.
 	 */
 	if (sync->is_v4)
 		sfe_cm_shaped_dev_scan();
@@ -1195,29 +1140,40 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	if (unlikely(nf_ct_is_dying(ct)))
 		return NF_ACCEPT;
 
-	if (unlikely(nfct_help(ct)))
-		return NF_ACCEPT;
+	struct nf_conn_help *help = nfct_help(ct);
+
+	if (unlikely(help)) {
+		struct nf_conntrack_helper *helper = rcu_dereference(help->helper);
+
+		/*
+		 * A full-cone mapping is complete in conntrack and kept alive by a
+		 * permanent expectation, so accelerating it is safe.
+		 */
+		if (test_bit(IPS_FULLCONE_BIT, &ct->status))
+			goto accel;
+
+		/*
+		 * BCM-NAT/BCM-NAT6 only set up an expectation on the first packet and
+		 * never inspect payloads; any other ALG must keep seeing packets.
+		 */
+		if (!helper || (strcmp(helper->name, "BCM-NAT") != 0 &&
+				strcmp(helper->name, "BCM-NAT6") != 0))
+			return NF_ACCEPT;
+	}
+
+accel:
 
 	/*
-	 * A flow that was already refused acceleration must not be re-examined on
-	 * every one of its packets (the decision depends on devices only, never on
-	 * the packet).
+	 * A flow that was already refused is not examined again on every packet: the
+	 * decision depends on devices only, never on the packet.
 	 */
 	if (unlikely(sfe_cm_no_accel_test(ct)))
 		return NF_ACCEPT;
 
 	/*
-	 * Delay offloading until the connection has exchanged at least
-	 * sfe_cm_delay_pkts packets.
-	 *
-	 * This provides a critical "decision window" for transparent proxies
-	 * (dae, honk, Clash, sing-box) and DPI/firewall software to inspect
-	 * initial packets (e.g. TLS ClientHello / SNI, HTTP Host, QUIC Initial)
-	 * and claim/redirect the flow before SFE accelerates it.
-	 *
-	 * Furthermore, it filters out short-lived "mice flows" (DNS queries,
-	 * NTP, port scans) from polluting SFE connection tables, eliminating
-	 * hash churn and spinlock contention on transient traffic.
+	 * Leave the first sfe_cm_delay_pkts packets to the stack: proxies and DPI
+	 * get a window to claim the flow, and short lived flows stay out of the
+	 * connection table.
 	 */
 	if (sfe_cm_delay_pkts && sfe_cm_get_pkt_count(ct) < sfe_cm_delay_pkts)
 		return NF_ACCEPT;
@@ -1272,13 +1228,9 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 
 	case IPPROTO_UDP:
 		/*
-		 * Only offload bidirectional, confirmed UDP sessions.  Single-packet
-		 * UDP queries or initial ambiguous packets (e.g., DNS, QUIC being
-		 * sniffed by dae/honk or queued in NFQUEUE) must not be prematurely
-		 * offloaded.  Note that this also keeps genuinely unidirectional flows
-		 * (syslog, SNMP traps, one-way RTP/IPTV) out of the engine for good;
-		 * udp_require_reply=0 restores the previous behaviour of offloading
-		 * them.
+		 * Only confirmed bidirectional UDP sessions are offloaded; one-way
+		 * flows (syslog, SNMP traps, RTP/IPTV) stay out unless
+		 * udp_require_reply=0.
 		 */
 		if (sfe_cm_udp_require_reply && !test_bit(IPS_SEEN_REPLY_BIT, &ct->status))
 			return NF_ACCEPT;
@@ -1300,9 +1252,8 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	}
 
 	/*
-	 * Optional rule inputs.  The connection mark is always carried over (it
-	 * costs a branch only for flows that use marks); DSCP and the TCP sequence
-	 * check are opt in.
+	 * Optional rule inputs: the connection mark is always carried over, DSCP
+	 * and the TCP sequence check are opt in.
 	 */
 	sic.mark = ct->mark;
 	if (sfe_cm_dscp_remark)
@@ -1316,12 +1267,9 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	src_dev = src_dev_tmp;
 
 	/*
-	 * The translated source (reply_tuple.dst) is the source address the peer
-	 * replies to - it never ends up in an L2 header, the engine only writes the
-	 * peer addresses it sends to - and the untranslated destination is wrong for
-	 * DNAT'ed flows (see sfe_cm_v2_ipv4_create_rule()).  Neither lookup is
-	 * therefore done: this also removes two failure points and two route and
-	 * neighbour lookups from every rule creation.
+	 * Neither address lookup is done: the translated source never reaches an
+	 * L2 header, and the untranslated destination is wrong for DNAT'ed flows
+	 * (see sfe_cm_v2_ipv4_create_rule()).
 	 */
 	if (!sfe_cm_find_dev_and_mac_addr(&sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4,
 					  &sic.return_is_pppoe, &sic.return_pppoe_session_id, sic.return_pppoe_remote_mac, &sic.return_top_dev))
@@ -1343,10 +1291,8 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	}
 
 	/*
-	 * See sfe_cm_pppoe_use_top(): a stacked side whose top device does traffic
-	 * control is kept on that top device, so the kernel keeps doing the PPPoE
-	 * encapsulation and pppoe-wan's queue and TC programs stay in the path.  The
-	 * top device reference is already held and released by the cleanup below.
+	 * See sfe_cm_pppoe_use_top(): a stacked side with a shaped top device
+	 * stays on that top device, so the kernel keeps encapsulating PPPoE.
 	 */
 	if (sic.flow_is_pppoe && sfe_cm_pppoe_use_top(sic.flow_top_dev)) {
 		src_dev = sic.flow_top_dev;
@@ -1430,17 +1376,11 @@ static unsigned int sfe_cm_ipv6_post_routing_hook(unsigned int hooknum, struct s
 #endif
 
 /*
- * Conntrack destroy event monitoring
+ * Conntrack destroy event monitoring.
  *
- * The engine only hands a rule back when its conntrack entry dies, so this is
- * the normal way accelerated flows are torn down.
- *
- * Kernels built with the QCA chain-events support (CONFIG_NF_CONNTRACK_CHAIN_EVENTS,
- * from the multi-registrant patch) give every user its own notifier.  Vanilla
- * kernels expose a single global slot instead: we take it over, forward the
- * events we consume to its previous owner (in practice ctnetlink) so that both
- * keep working, and re-claim it from the periodic work in case somebody
- * registers after us.
+ * Kernels with the multi-registrant patch (CONFIG_NF_CONNTRACK_CHAIN_EVENTS) give
+ * every user its own notifier; vanilla kernels have a single slot, which is taken
+ * over and forwarded to its previous owner.
  */
 static void sfe_cm_conntrack_destroy(unsigned int events, const struct nf_ct_event *item)
 {
@@ -1544,11 +1484,8 @@ static struct nf_ct_event_notifier sfe_cm_conntrack_notifier = {
 
 /*
  * sfe_cm_conntrack_notifier_reclaim()
- *	Own the (single) conntrack event notifier slot.
- *
- * Clearing the slot before taking it keeps the kernel from warning about
- * overwriting a live registration; the previous owner is remembered so that its
- * events can be forwarded.
+ *	Own the (single) conntrack event notifier slot, remembering its previous
+ *	owner so its events can be forwarded.
  */
 static void sfe_cm_conntrack_notifier_reclaim(void)
 {
@@ -1603,13 +1540,8 @@ static struct nf_hook_ops sfe_cm_ops_post_routing[] __read_mostly = {
 
 /*
  * sfe_cm_flush_dev()
- *	Drop every accelerated flow that uses a device.
- *
- * An accelerated rule caches the device, its MAC and (for PPPoE) the session ID
- * and peer MAC, so it must not outlive the device it was built on: after a WAN
- * flap it would keep encapsulating with stale information.  The engine holds
- * device references, so the pointers stay valid but useless - it has to be told
- * explicitly.
+ *	Drop every accelerated flow using a device; a rule caches the device, its
+ *	MAC and the PPPoE session, so it must not outlive them.
  */
 static void sfe_cm_flush_dev(struct net_device *dev)
 {
@@ -1624,13 +1556,11 @@ static void sfe_cm_flush_dev(struct net_device *dev)
 }
 
 /*
- * Traffic control can be attached to a device long after a flow was built,
- * including to a device the engine bypasses (see sfe_cm_shaped_bypass_dev()).
- * Such flows would keep skipping it, so watch the devices from the periodic work
- * and drop the flows of a device the first time it becomes shaped; from then on
- * they are either rebuilt with fast transmit disabled or refused altogether.
+ * Traffic control can appear on a device (including one the engine bypasses)
+ * after flows were built, and those flows would keep skipping it.  The periodic
+ * work drops the flows of a device the first time it becomes shaped.
  *
- * Only the (single threaded) sync work touches the list, no locking is needed.
+ * Only the sync work touches the list, no locking is needed.
  */
 #define SFE_CM_SHAPED_DEV_MAX	16
 static int sfe_cm_shaped_devs[SFE_CM_SHAPED_DEV_MAX];
@@ -1649,6 +1579,10 @@ static void sfe_cm_shaped_dev_scan(void)
 			if (nseen == SFE_CM_SHAPED_DEV_MAX)
 				break;
 
+			/*
+			 * Both directions matter: a bypassed ingress program on a
+			 * stacked top device is only noticed by the flush below.
+			 */
 			if (sfe_dev_is_shaped(dev))
 				seen[nseen++] = dev->ifindex;
 		}
@@ -1685,10 +1619,8 @@ static int sfe_cm_device_event(struct notifier_block *this, unsigned long event,
 	struct net_device *dev = SFE_DEV_EVENT_PTR(ptr);
 
 	/*
-	 * Rules cache the device, its MAC and the device features captured when the
-	 * rule was built, so any change of those has to drop them: DOWN/UNREGISTER
-	 * for the device going away, CHANGEADDR for its MAC, FEAT_CHANGE/CHANGEMTU
-	 * for the transmit path changing underneath the cached features.
+	 * A rule caches the device, its MAC and the transmit features taken at
+	 * creation, so any change of those drops it.
 	 */
 	if (dev && (event == NETDEV_DOWN || event == NETDEV_UNREGISTER ||
 		    event == NETDEV_CHANGEADDR || event == NETDEV_FEAT_CHANGE ||
@@ -1703,8 +1635,7 @@ static int sfe_cm_inet_event(struct notifier_block *this, unsigned long event, v
 	struct in_ifaddr *ifa = ptr;
 
 	/*
-	 * Address notifiers report NETDEV_DOWN when an address is removed, and
-	 * always carry the in_ifaddr that is going away.
+	 * Address notifiers report NETDEV_DOWN and carry the ifaddr going away.
 	 */
 	if (ifa && ifa->ifa_dev && (event == NETDEV_DOWN))
 		sfe_cm_flush_dev(ifa->ifa_dev->dev);
@@ -1730,11 +1661,8 @@ static int __init sfe_cm_init(void)
 	pr_info("sfe_cm: Qualcomm Shortcut-FE v2 Connection Manager loading\n");
 
 	/*
-	 * A configured window needs conntrack accounting: the extension is added when
-	 * a conntrack entry is allocated, so it has to be on before the flows we want
-	 * to hold back are created.  Turn it on here (init scripts and users are not
-	 * relied upon) and remember the previous value for module exit.  Only flows
-	 * created from now on carry the extension - existing ones cannot be fixed up.
+	 * The accounting extension is added when a conntrack entry is allocated, so
+	 * it has to be enabled before the flows to hold back are created.
 	 */
 	if (sfe_cm_delay_pkts) {
 		if (!nf_ct_acct_enabled(&init_net)) {
@@ -1865,8 +1793,8 @@ static void __exit sfe_cm_exit(void)
 #endif
 
 	/*
-	 * Only put accounting back if we are the ones who turned it on and nobody
-	 * changed it since.
+	 * Restore accounting only if this module enabled it and it was not changed
+	 * since.
 	 */
 	if (sfe_cm_acct_prev >= 0 && nf_ct_acct_enabled(&init_net))
 		init_net.ct.sysctl_acct = sfe_cm_acct_prev;

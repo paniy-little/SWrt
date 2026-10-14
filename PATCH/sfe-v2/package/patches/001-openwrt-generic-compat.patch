@@ -28,7 +28,7 @@ index 03fb87c..6dd1c20 100644
 +ccflags-y += -Wall -Wno-missing-prototypes -Wno-error -I$(src)/exports/ -I$(src) -include $(src)/sfe_compat.h
 +
 diff --git a/sfe.c b/sfe.c
-index 66c6187..b68fe82 100644
+index 66c6187..f5698d7 100644
 --- a/sfe.c
 +++ b/sfe.c
 @@ -39,7 +39,57 @@
@@ -148,8 +148,8 @@ index 66c6187..b68fe82 100644
 +	}
 +
 +	/*
-+	 * If the kernel carries athrs_fast_nat_recv (e.g. CONFIG_SHORTCUT_FE from patch 953),
-+	 * hook it for ultra-low-latency L2 bypass on clean interfaces.
++	 * The kernel provides athrs_fast_nat_recv (patch 953); hook it for the L2
++	 * bypass.  Without it the netfilter hook stays as the ingress path.
  	 */
 -	BUG_ON(athrs_fast_nat_recv);
 -	RCU_INIT_POINTER(athrs_fast_nat_recv, sfe_recv);
@@ -168,7 +168,7 @@ index 66c6187..b68fe82 100644
  
  	/*
 -	 * Unregister our receive callback.
-+	 * Unregister our receive callbacks.
++	 * Unregister the receive callbacks.
  	 */
 -	RCU_INIT_POINTER(athrs_fast_nat_recv, NULL);
 +	if (sfe_fast_nat_recv_p) {
@@ -195,20 +195,16 @@ index 6cedf95..71355db 100644
  
  #define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
 diff --git a/sfe_ipv4.c b/sfe_ipv4.c
-index 46421b6..397df0d 100644
+index 46421b6..abc1464 100644
 --- a/sfe_ipv4.c
 +++ b/sfe_ipv4.c
-@@ -1745,9 +1745,19 @@ bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
+@@ -1745,9 +1745,15 @@ bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
  
  	switch (mark->type) {
  	case SFE_CONNECTION_MARK_TYPE_CONNMARK:
 +		/*
-+		 * The data path writes skb->mark only when the match carries the MARK
-+		 * flag.  Upstream maintained that flag in the SAWF branch but not here,
-+		 * so a mark pushed to an established rule - which was created without a
-+		 * mark and therefore without the flag - was stored but never applied.
-+		 * Keep value and flag together, mirroring what rule creation does for
-+		 * SFE_RULE_CREATE_MARK_VALID.
++		 * The data path writes skb->mark only when the MARK flag is set; keep
++		 * value and flag together.
 +		 */
  		c->original_match->mark = mark->flow_mark;
 +		c->original_match->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
@@ -218,17 +214,32 @@ index 46421b6..397df0d 100644
  		}
  		spin_unlock_bh(&si->lock);
  		break;
-@@ -2599,6 +2609,28 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
+@@ -2359,6 +2365,16 @@ update_done:
+ 
+ 	original_cm->xmit_dev_mtu = if_min_mtu;
+ 
++	/*
++	 * dev_fast_xmit()/sfe_fast_xmit_check() use this mask to decide whether a
++	 * packet can be handed to the driver as-is (linear, GSO/frag list, checksum
++	 * offload) or has to go back through dev_queue_xmit().  It has to come from the
++	 * device this rule transmits on: skb->dev is the receiving device here, so
++	 * netif_skb_features() cannot be used.  Without it the mask stays zero and
++	 * every non-linear packet - the GSO bulk case - falls back.
++	 */
++	original_cm->features = dest_dev->features;
++
+ 	original_cm->connection = c;
+ 	original_cm->counter_match = NULL;
+ 
+@@ -2599,6 +2615,26 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
  		return_interface_num = msg->conn_rule.return_interface_num;
  	}
  
 +	/*
-+	 * Check for an existing flow before taking any device reference or
-+	 * allocating anything: a packet that the fast path could not take keeps
-+	 * asking for the same rule, so that case must not cost two device lookups
-+	 * and three atomic allocations.  Nothing is held at this point, so this
-+	 * can return straight away.  The check further down is kept for the
-+	 * concurrent create race.
++	 * Check for an existing flow before taking device references or allocating:
++	 * a packet the fast path could not take keeps asking for the same rule, so
++	 * that case must not cost two device lookups and three atomic allocations.
++	 * The check further down stays for the concurrent create race.
 +	 */
 +	spin_lock_bh(&si->lock);
 +	c_old = sfe_ipv4_find_connection(si, msg->tuple.protocol,
@@ -247,16 +258,15 @@ index 46421b6..397df0d 100644
  	src_dev = dev_get_by_index(&init_net, flow_interface_num);
  	if (!src_dev) {
  		DEBUG_WARN("%px: Unable to find src_dev corresponding to %d\n", msg,
-@@ -2756,6 +2788,21 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
+@@ -2756,6 +2792,20 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
  	original_cm->top_interface_dev = NULL;
  	reply_cm->top_interface_dev = NULL;
  
 +	/*
-+	 * Remember the top device of a stacked interface even when the frame is
-+	 * sent on the bottom device (PPPoE).  The connection manager uses it to
-+	 * notice that traffic control was attached to a device this engine
-+	 * bypasses, and sfe_ipv4_destroy_all_rules_for_dev() matches on it to
-+	 * tear the affected flows down again.
++	 * Remember the top device of a stacked interface (PPPoE) even when the frame
++	 * is sent on the bottom one: the connection manager uses it to notice traffic
++	 * control attached to a device this engine bypasses, and the flush path matches
++	 * on it to tear those flows down.
 +	 */
 +	if (msg->conn_rule.return_top_interface_num != return_interface_num) {
 +		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
@@ -269,7 +279,19 @@ index 46421b6..397df0d 100644
  	/*
  	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
  	 * For qdisc is enabled on bottom interface alone, we use dev_queue_xmit() instead to transmit to bottom interface.
-@@ -3977,7 +4024,9 @@ another_round:
+@@ -3193,6 +3243,11 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
+ 
+ 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
+ 
++	/*
++	 * Reply direction: same as the original direction above.
++	 */
++	reply_cm->features = src_dev->features;
++
+ 	if (msg->valid_flags & SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID) {
+                 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD;
+         }
+@@ -3977,7 +4032,9 @@ another_round:
  		 */
  		if (!dev
  		    || (dev == c->original_dev)
@@ -280,14 +302,13 @@ index 46421b6..397df0d 100644
  			break;
  		}
  	}
-@@ -3996,6 +4045,13 @@ another_round:
+@@ -3996,6 +4053,12 @@ another_round:
  	}
  }
  
 +/*
-+ * The connection manager needs to drop the flows of a device when it goes down,
-+ * and those flows can be attached to a stacked device (the top interface, e.g.
-+ * pppoe-wan) rather than to the device the packet entered or left through.
++ * Exported for the connection manager: a stacked device (top interface, e.g.
++ * pppoe-wan) has to be matched too when its flows are torn down.
 + */
 +EXPORT_SYMBOL(sfe_ipv4_destroy_all_rules_for_dev);
 +
@@ -418,17 +439,16 @@ index baedc0f..f071626 100644
  
  	/*
 diff --git a/sfe_ipv6.c b/sfe_ipv6.c
-index 3dadf70..b43d6c9 100644
+index 3dadf70..caee5ea 100644
 --- a/sfe_ipv6.c
 +++ b/sfe_ipv6.c
-@@ -1486,9 +1486,15 @@ bool sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
+@@ -1486,9 +1486,14 @@ bool sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
  
  	switch (mark->type) {
  	case SFE_CONNECTION_MARK_TYPE_CONNMARK:
 -		c->original_match ->mark = mark->flow_mark;
 +		/*
-+		 * See sfe_ipv4_mark_rule_update(): the MARK flag has to follow the value,
-+		 * otherwise the data path never stores skb->mark for this rule.
++		 * Same as sfe_ipv4_mark_rule_update(): the flag follows the value.
 +		 */
 +		c->original_match->mark = mark->flow_mark;
 +		c->original_match->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
@@ -438,17 +458,32 @@ index 3dadf70..b43d6c9 100644
  		}
  		spin_unlock_bh(&si->lock);
  		break;
-@@ -2286,6 +2292,28 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
+@@ -2053,6 +2058,16 @@ update_done:
+ 
+ 	original_cm->xmit_dev_mtu = if_min_mtu;
+ 
++	/*
++	 * dev_fast_xmit()/sfe_fast_xmit_check() use this mask to decide whether a
++	 * packet can be handed to the driver as-is (linear, GSO/frag list, checksum
++	 * offload) or has to go back through dev_queue_xmit().  It has to come from the
++	 * device this rule transmits on: skb->dev is the receiving device here, so
++	 * netif_skb_features() cannot be used.  Without it the mask stays zero and
++	 * every non-linear packet - the GSO bulk case - falls back.
++	 */
++	original_cm->features = dest_dev->features;
++
+ 	original_cm->connection = c;
+ 	original_cm->counter_match = NULL;
+ 
+@@ -2286,6 +2301,26 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
  		return_interface_num = msg->conn_rule.return_interface_num;
  	}
  
 +	/*
-+	 * Check for an existing flow before taking any device reference or
-+	 * allocating anything: a packet that the fast path could not take keeps
-+	 * asking for the same rule, so that case must not cost two device lookups
-+	 * and three atomic allocations.  Nothing is held at this point, so this
-+	 * can return straight away.  The check further down is kept for the
-+	 * concurrent create race.
++	 * Check for an existing flow before taking device references or allocating:
++	 * a packet the fast path could not take keeps asking for the same rule, so
++	 * that case must not cost two device lookups and three atomic allocations.
++	 * The check further down stays for the concurrent create race.
 +	 */
 +	spin_lock_bh(&si->lock);
 +	old_c = sfe_ipv6_find_connection(si, tuple->protocol,
@@ -467,16 +502,15 @@ index 3dadf70..b43d6c9 100644
  	src_dev = dev_get_by_index(&init_net, flow_interface_num);
  	if (!src_dev) {
  		DEBUG_WARN("%px: Unable to find src_dev corresponding to %d\n", msg,
-@@ -2415,6 +2443,21 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
+@@ -2415,6 +2450,20 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
  	original_cm->top_interface_dev = NULL;
  	reply_cm->top_interface_dev = NULL;
  
 +	/*
-+	 * Remember the top device of a stacked interface even when the frame is
-+	 * sent on the bottom device (PPPoE).  The connection manager uses it to
-+	 * notice that traffic control was attached to a device this engine
-+	 * bypasses, and sfe_ipv4_destroy_all_rules_for_dev() matches on it to
-+	 * tear the affected flows down again.
++	 * Remember the top device of a stacked interface (PPPoE) even when the frame
++	 * is sent on the bottom one: the connection manager uses it to notice traffic
++	 * control attached to a device this engine bypasses, and the flush path matches
++	 * on it to tear those flows down.
 +	 */
 +	if (msg->conn_rule.return_top_interface_num != return_interface_num) {
 +		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
@@ -489,7 +523,19 @@ index 3dadf70..b43d6c9 100644
  #if defined(SFE_RFS_SUPPORTED)
  	original_cm->rfs_enabled = false;
  	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
-@@ -3637,7 +3680,9 @@ another_round:
+@@ -2863,6 +2912,11 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
+ 
+ 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
+ 
++	/*
++	 * Reply direction: same as the original direction above.
++	 */
++	reply_cm->features = src_dev->features;
++
+ 	reply_cm->connection = c;
+ 	reply_cm->counter_match = original_cm;
+ 
+@@ -3637,7 +3691,9 @@ another_round:
  		 */
  		if (!dev
  		    || (dev == c->original_dev)
@@ -500,14 +546,13 @@ index 3dadf70..b43d6c9 100644
  			break;
  		}
  	}
-@@ -3656,6 +3701,13 @@ another_round:
+@@ -3656,6 +3712,12 @@ another_round:
  	}
  }
  
 +/*
-+ * The connection manager needs to drop the flows of a device when it goes down,
-+ * and those flows can be attached to a stacked device (the top interface, e.g.
-+ * pppoe-wan) rather than to the device the packet entered or left through.
++ * Exported for the connection manager: a stacked device (top interface, e.g.
++ * pppoe-wan) has to be matched too when its flows are torn down.
 + */
 +EXPORT_SYMBOL(sfe_ipv6_destroy_all_rules_for_dev);
 +
