@@ -994,7 +994,7 @@ static void sfe_cm_v2_ipv4_one_sync_callback(void *app_data, struct sfe_ipv4_msg
 
 	s = &msg->msg.conn_stats;
 	atomic64_inc(&sfe_cm_stat_flushed);
-	pr_info_ratelimited("sfe_cm: engine dropped %pI4:%u -> %pI4:%u (proto %u reason %u cause %u, %u/%u pkts)\n",
+	pr_debug_ratelimited("sfe_cm: engine dropped %pI4:%u -> %pI4:%u (proto %u reason %u cause %u, %u/%u pkts)\n",
 			    &s->flow_ip, ntohs(s->flow_ident), &s->return_ip, ntohs(s->return_ident),
 			    s->protocol, s->reason, s->cause,
 			    s->flow_rx_packet_count, s->return_rx_packet_count);
@@ -1046,7 +1046,7 @@ static void sfe_cm_v2_ipv6_one_sync_callback(void *app_data, struct sfe_ipv6_msg
 
 	s = &msg->msg.conn_stats;
 	atomic64_inc(&sfe_cm_stat_flushed);
-	pr_info_ratelimited("sfe_cm: engine dropped [%pI6]:%u -> [%pI6]:%u (proto %u reason %u cause %u)\n",
+	pr_debug_ratelimited("sfe_cm: engine dropped [%pI6]:%u -> [%pI6]:%u (proto %u reason %u cause %u)\n",
 			    s->flow_ip, ntohs(s->flow_ident), s->return_ip, ntohs(s->return_ident),
 			    s->protocol, s->reason, s->cause);
 }

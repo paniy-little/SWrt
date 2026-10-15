@@ -75,7 +75,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +++ b/root/usr/share/firewall4/templates/zone-brcmfullcone.uc
 @@ -0,0 +1,4 @@
 +{# /usr/share/firewall4/templates/zone-brcmfullcone.uc #}
-+		meta nfproto {{ fw4.nfproto(family) }} masquerade brcmfullcone comment "!fw4: Handle {{
++		meta nfproto {{ fw4.nfproto(family) }} masquerade {{ family == 6 ? 'ip6' : 'ip' }} brcmfullcone comment "!fw4: Handle {{
 +		zone.name
 +}} {{ fw4.nfproto(family, true) }} BCM fullcone NAT {{ direction }} traffic"
 --- a/root/usr/share/ucode/fw4.uc
@@ -86,30 +86,31 @@ Signed-off-by: YAOF-1 <dev@localhost>
  const fs = require("fs");
  const uci = require("uci");
  const ubus = require("ubus");
-@@ -490,6 +492,22 @@ function nft_try_hw_offload(devices) {
+@@ -490,6 +492,23 @@ function nft_try_hw_offload(devices) {
  }
  
  
-+function nft_try_brcmfullcone(family) {
++function nft_try_brcmfullcone(family, loud) {
 +	let nft_test =
 +		'add table inet fw4-brcmfullcone-test; ' +
 +		'add chain inet fw4-brcmfullcone-test srcnat { ' +
 +			'type nat hook postrouting priority srcnat; policy accept; ' +
-+			sprintf('meta nfproto %s masquerade brcmfullcone; ', family == 6 ? 'ipv6' : 'ipv4') +
++			sprintf('meta nfproto %s masquerade %s brcmfullcone; ', family == 6 ? 'ipv6' : 'ipv4', family == 6 ? 'ip6' : 'ip') +
 +		'}; ';
 +	let cmd = sprintf("/usr/sbin/nft -c '%s' 2>/dev/null", replace(nft_test, "'", "'\\''"));
 +
 +	if (system(cmd) == 0)
 +		return true;
 +
-+	warn("nft_try_brcmfullcone: IPv" + (family == 6 ? "6" : "4") + " not supported\n");
++	if (loud)
++		warn("nft_try_brcmfullcone: IPv" + (family == 6 ? "6" : "4") + " not supported\n");
 +	return false;
 +}
 +
  return {
  	read_kernel_version: function() {
  		let fd = fs.open("/proc/version", "r"),
-@@ -855,6 +873,18 @@ return {
+@@ -855,6 +874,18 @@ return {
  			warn(`[!] ${msg}\n`);
  	},
  
@@ -168,14 +169,14 @@ Signed-off-by: YAOF-1 <dev@localhost>
  			input: [ "policy", "drop" ],
  			output: [ "policy", "drop" ],
  			forward: [ "policy", "drop" ],
-@@ -1980,6 +2027,17 @@ return {
+@@ -1980,6 +2028,17 @@ return {
  
  		delete defs.syn_flood;
  
 +		if (defs.brcmfullcone == 1) {
-+			if (!nft_try_brcmfullcone(4))
++			if (!nft_try_brcmfullcone(4, defs.fullcone4))
 +				defs.fullcone4 = 0;
-+			if (!nft_try_brcmfullcone(6))
++			if (!nft_try_brcmfullcone(6, defs.fullcone6))
 +				defs.fullcone6 = 0;
 +			if (!defs.fullcone4 && !defs.fullcone6) {
 +				delete defs.brcmfullcone;
@@ -186,7 +187,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  		this.state.defaults = defs;
  	},
  
-@@ -2004,6 +2060,8 @@ return {
+@@ -2004,6 +2061,8 @@ return {
  			masq_dest: [ "network", null, PARSE_LIST ],
  
  			masq6: [ "bool" ],

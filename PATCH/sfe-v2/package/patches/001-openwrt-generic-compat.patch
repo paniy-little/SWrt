@@ -799,3 +799,47 @@ index d4df982..0cb40b3 100644
  		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
  		return 1;
  	}
+--- a/sfe_ipv4_udp.c
++++ b/sfe_ipv4_udp.c
+@@ -663,7 +655,8 @@
+ 	 * not recalculated further in packet path.
+ 	 */
+ 	if (likely(hw_csum)) {
+ 		skb->ip_summed = CHECKSUM_PARTIAL;
++		sfe_skb_complete_csum_offsets(skb);
+ 	} else {
+ 		iph->check = sfe_ipv4_gen_ip_csum(iph);
+ 	}
+--- a/sfe_ipv4_tcp.c
++++ b/sfe_ipv4_tcp.c
+@@ -813,7 +811,8 @@
+ 	 * not recalculated further in packet path.
+ 	 */
+ 	if (likely(hw_csum)) {
+ 		skb->ip_summed = CHECKSUM_PARTIAL;
++		sfe_skb_complete_csum_offsets(skb);
+ 	} else {
+ 		/*
+ 		 * Received GRO packet and tx csum is not enabled.
+--- a/sfe_ipv6_udp.c
++++ b/sfe_ipv6_udp.c
+@@ -644,7 +636,8 @@
+ 	 * path.
+ 	 */
+ 	if (likely(hw_csum)) {
+ 		skb->ip_summed = CHECKSUM_PARTIAL;
++		sfe_skb_complete_csum_offsets(skb);
+ 	}
+ 
+ 	/*
+--- a/sfe_ipv6_tcp.c
++++ b/sfe_ipv6_tcp.c
+@@ -774,7 +772,8 @@
+ 	 * path.
+ 	 */
+ 	if (likely(hw_csum)) {
+ 		skb->ip_summed = CHECKSUM_PARTIAL;
++		sfe_skb_complete_csum_offsets(skb);
+ 	} else {
+ 		/*
+ 		 * Received GRO packet and tx csum is not enabled.

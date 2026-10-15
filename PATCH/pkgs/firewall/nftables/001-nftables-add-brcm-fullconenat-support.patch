@@ -147,10 +147,29 @@ Signed-off-by: YAOF-1 <dev@localhost>
  %token REDIRECT			"redirect"
  %token RANDOM			"random"
  %token FULLY_RANDOM		"fully-random"
-@@ -4114,6 +4115,15 @@
+@@ -4114,6 +4115,34 @@
  			{
  				$<stmt>0->nat.flags = $1;
  			}
++			|	nf_key_proto BRCMFULLCONE
++			{
++				/* non-zero address register selects the brcm full-cone path */
++				if ($1 == NFPROTO_IPV6) {
++					struct in6_addr addr = { .s6_addr = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x04, 0xE5 } };
++
++					$<stmt>0->nat.addr = constant_expr_alloc(&@$, &ip6addr_type,
++										BYTEORDER_BIG_ENDIAN,
++										sizeof(addr) * BITS_PER_BYTE,
++										&addr);
++				} else {
++					uint32_t addr = htonl(0x4E5);
++
++					$<stmt>0->nat.addr = constant_expr_alloc(&@$, &ipaddr_type,
++										BYTEORDER_BIG_ENDIAN,
++										sizeof(addr) * BITS_PER_BYTE,
++										&addr);
++				}
++			}
 +			|	BRCMFULLCONE
 +			{
 +				/* non-zero address register selects the brcm full-cone path */

@@ -8,6 +8,9 @@
 #ifndef _SFE_COMPAT_H_
 #define _SFE_COMPAT_H_
 
+#include <linux/udp.h>
+#include <linux/tcp.h>
+#include <linux/if_ether.h>
 #include <linux/version.h>
 #include <linux/types.h>
 #include <linux/netdevice.h>
@@ -300,6 +303,49 @@ static inline bool sfe_dev_is_shaped(struct net_device *dev)
 		return false;
 
 	return sfe_dev_has_tc_ingress(dev) || sfe_dev_tx_is_shaped(dev);
+}
+
+/*
+ * The engine marks forwarded packets CHECKSUM_PARTIAL and leaves csum_start and
+ * csum_offset at zero, because the QCA NSS driver locates the L4 checksum from
+ * the packet itself.  A mainline driver and the mainline stack need both
+ * offsets, so fill them in when the engine left them unset: otherwise
+ * validate_xmit_skb() -> skb_csum_hwoffload_help() -> skb_checksum_help() warns
+ * and drops the packet.
+ */
+static inline void sfe_skb_complete_csum_offsets(struct sk_buff *skb)
+{
+	unsigned int l4_off;
+	u8 proto;
+
+	if (skb->ip_summed != CHECKSUM_PARTIAL || skb->csum_start)
+		return;
+
+	if (skb->protocol == htons(ETH_P_IP)) {
+		const struct iphdr *iph = ip_hdr(skb);
+
+		if (iph->ihl < 5 || (iph->frag_off & htons(IP_OFFSET)))
+			return;
+
+		l4_off = (unsigned int)skb->network_header + iph->ihl * 4;
+		proto = iph->protocol;
+	} else if (skb->protocol == htons(ETH_P_IPV6)) {
+		const struct ipv6hdr *ip6h = ipv6_hdr(skb);
+
+		l4_off = (unsigned int)skb->network_header + sizeof(*ip6h);
+		proto = ip6h->nexthdr;
+	} else {
+		return;
+	}
+
+	if (proto == IPPROTO_TCP)
+		skb->csum_offset = offsetof(struct tcphdr, check);
+	else if (proto == IPPROTO_UDP)
+		skb->csum_offset = offsetof(struct udphdr, check);
+	else
+		return;
+
+	skb->csum_start = l4_off;
 }
 
 /*
