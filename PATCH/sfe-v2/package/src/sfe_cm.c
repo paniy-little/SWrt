@@ -182,6 +182,8 @@ static struct sfe_ctx_instance *sfe_v6_ctx;
  *   control, so pppoe-wan queue and TC programs stay in the path; 0 refuses such
  *   flows instead of moving them.
  * - dscp_remark, src_iface_check, tcp_no_seq_check: optional rule inputs.
+ * - refuse_all_shaped: 1 refuses every flow meeting traffic control on the devices
+ *   the engine uses; 0 (default) refuses only flows the stack steers elsewhere.
  */
 static unsigned int sfe_cm_delay_pkts = 8;
 module_param_named(delay_pkts, sfe_cm_delay_pkts, uint, 0644);
@@ -216,6 +218,10 @@ static bool sfe_cm_tcp_no_seq_check;
 module_param_named(tcp_no_seq_check, sfe_cm_tcp_no_seq_check, bool, 0644);
 MODULE_PARM_DESC(tcp_no_seq_check, "Skip the engine's TCP sequence and window validation (default 0)");
 
+static bool sfe_cm_refuse_all_shaped;
+module_param_named(refuse_all_shaped, sfe_cm_refuse_all_shaped, bool, 0644);
+MODULE_PARM_DESC(refuse_all_shaped, "Refuse every flow meeting traffic control on its devices (default 0: refuse only flows the stack steers elsewhere)");
+
 /*
  * delay_pkts counts packets through the conntrack accounting extension, so the
  * window cannot work without it.  Turn it on for as long as the module is loaded
@@ -230,6 +236,7 @@ static int sfe_cm_acct_prev = -1;
 static atomic64_t sfe_cm_stat_created = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_refused = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_flushed = ATOMIC64_INIT(0);
+static atomic64_t sfe_cm_stat_engine_flushed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_destroyed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_mark_pushed = ATOMIC64_INIT(0);
 static atomic64_t sfe_cm_stat_memo_added = ATOMIC64_INIT(0);
@@ -259,13 +266,35 @@ static inline bool sfe_cm_pppoe_use_top(struct net_device *top_dev)
  * refuse a side whose bypassed top device has traffic control, so its packets
  * take the ordinary kernel path with qdisc and TC included.
  */
-static struct net_device *sfe_cm_bypass_refused(struct sfe_connection_create *sic)
+static struct net_device *sfe_cm_bypass_refused(struct sfe_connection_create *sic,
+						struct sk_buff *skb,
+						enum ip_conntrack_info ctinfo)
 {
 	if (!sic->flow_top_xmit && sfe_dev_is_shaped(sic->flow_top_dev))
 		return sic->flow_top_dev;
 
 	if (!sic->return_top_xmit && sfe_dev_is_shaped(sic->return_top_dev))
 		return sic->return_top_dev;
+
+	if (unlikely(sfe_cm_refuse_all_shaped)) {
+		/*
+		 * Strict mode: refuse every flow meeting traffic control on the
+		 * devices the engine uses; sfe_cm_shaped_dev_scan() destroys rules
+		 * for exactly those.
+		 */
+		if (!sic->flow_top_xmit && sfe_dev_is_shaped(sic->dest_dev))
+			return sic->dest_dev;
+
+		if (!sic->return_top_xmit && sfe_dev_is_shaped(sic->src_dev))
+			return sic->src_dev;
+	} else if (!sic->flow_top_xmit && !sic->return_top_xmit) {
+		struct net_device *want;
+
+		/* The stack sends it somewhere else than the engine would. */
+		want = (ctinfo >= IP_CT_IS_REPLY) ? sic->src_dev : sic->dest_dev;
+		if (want && skb->dev != want)
+			return skb->dev;
+	}
 
 	return NULL;
 }
@@ -281,16 +310,18 @@ static int sfe_cm_status_get(char *buffer, const struct kernel_param *kp)
 	p += scnprintf(p, PAGE_SIZE - (p - buffer),
 		       "delay_pkts=%u fast_xmit=%d udp_require_reply=%d pppoe_top_xmit=%d\n"
 		       "dscp_remark=%d src_iface_check=%d tcp_no_seq_check=%d\n"
-		       "rules_created=%llu rules_refused=%llu engine_flushed=%llu flows_destroyed=%llu "
-		       "marks_pushed=%llu refused_memos=%llu\n",
+		       "rules_created=%llu rules_refused=%llu rule_sync=%llu engine_flushed=%llu "
+		       "flows_destroyed=%llu marks_pushed=%llu refused_memos=%llu refuse_all_shaped=%d\n",
 		       sfe_cm_delay_pkts, sfe_cm_fast_xmit, sfe_cm_udp_require_reply, sfe_cm_pppoe_top_xmit,
 		       sfe_cm_dscp_remark, sfe_cm_src_iface_check, sfe_cm_tcp_no_seq_check,
 		       (unsigned long long)atomic64_read(&sfe_cm_stat_created),
 		       (unsigned long long)atomic64_read(&sfe_cm_stat_refused),
 		       (unsigned long long)atomic64_read(&sfe_cm_stat_flushed),
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_engine_flushed),
 		       (unsigned long long)atomic64_read(&sfe_cm_stat_destroyed),
 		       (unsigned long long)atomic64_read(&sfe_cm_stat_mark_pushed),
-		       (unsigned long long)atomic64_read(&sfe_cm_stat_memo_added));
+		       (unsigned long long)atomic64_read(&sfe_cm_stat_memo_added),
+		       sfe_cm_refuse_all_shaped);
 
 	p += scnprintf(p, PAGE_SIZE - (p - buffer), "conntrack_acct=%d acct_enabled_by_us=%d\n",
 		       nf_ct_acct_enabled(&init_net) ? 1 : 0, sfe_cm_acct_prev >= 0);
@@ -431,7 +462,9 @@ static void sfe_cm_conntrack_notifier_reclaim(void);
 /*
  * SFE v2 API bridges
  */
-static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
+static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic,
+				      struct sk_buff *skb,
+				      enum ip_conntrack_info ctinfo)
 {
 	struct sfe_ipv4_msg msg;
 	struct net_device *shaped;
@@ -439,9 +472,9 @@ static int sfe_cm_v2_ipv4_create_rule(struct sfe_connection_create *sic)
 	if (unlikely(!sfe_v4_ctx))
 		return -EINVAL;
 
-	shaped = sfe_cm_bypass_refused(sic);
+	shaped = sfe_cm_bypass_refused(sic, skb, ctinfo);
 	if (unlikely(shaped)) {
-		pr_info_ratelimited("sfe_cm: %s does traffic control, leaving this flow to the kernel\n",
+		pr_info_ratelimited("sfe_cm: leaving this flow to the kernel (%s)\n",
 				    shaped->name);
 		return -EOPNOTSUPP;
 	}
@@ -591,7 +624,9 @@ static void sfe_cm_v2_ipv4_destroy_rule(struct sfe_connection_destroy *sid)
 }
 
 #ifdef SFE_SUPPORT_IPV6
-static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
+static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic,
+				      struct sk_buff *skb,
+				      enum ip_conntrack_info ctinfo)
 {
 	struct sfe_ipv6_msg msg;
 	struct net_device *shaped;
@@ -599,9 +634,9 @@ static int sfe_cm_v2_ipv6_create_rule(struct sfe_connection_create *sic)
 	if (unlikely(!sfe_v6_ctx))
 		return -EINVAL;
 
-	shaped = sfe_cm_bypass_refused(sic);
+	shaped = sfe_cm_bypass_refused(sic, skb, ctinfo);
 	if (unlikely(shaped)) {
-		pr_info_ratelimited("sfe_cm: %s does traffic control, leaving this flow to the kernel\n",
+		pr_info_ratelimited("sfe_cm: leaving this flow to the kernel (%s)\n",
 				    shaped->name);
 		return -EOPNOTSUPP;
 	}
@@ -994,6 +1029,10 @@ static void sfe_cm_v2_ipv4_one_sync_callback(void *app_data, struct sfe_ipv4_msg
 
 	s = &msg->msg.conn_stats;
 	atomic64_inc(&sfe_cm_stat_flushed);
+	if (s->reason == SFE_RULE_SYNC_REASON_FLUSH ||
+	    s->reason == SFE_RULE_SYNC_REASON_EVICT ||
+	    s->reason == SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE)
+		atomic64_inc(&sfe_cm_stat_engine_flushed);
 	pr_debug_ratelimited("sfe_cm: engine dropped %pI4:%u -> %pI4:%u (proto %u reason %u cause %u, %u/%u pkts)\n",
 			    &s->flow_ip, ntohs(s->flow_ident), &s->return_ip, ntohs(s->return_ident),
 			    s->protocol, s->reason, s->cause,
@@ -1046,6 +1085,10 @@ static void sfe_cm_v2_ipv6_one_sync_callback(void *app_data, struct sfe_ipv6_msg
 
 	s = &msg->msg.conn_stats;
 	atomic64_inc(&sfe_cm_stat_flushed);
+	if (s->reason == SFE_RULE_SYNC_REASON_FLUSH ||
+	    s->reason == SFE_RULE_SYNC_REASON_EVICT ||
+	    s->reason == SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE)
+		atomic64_inc(&sfe_cm_stat_engine_flushed);
 	pr_debug_ratelimited("sfe_cm: engine dropped [%pI6]:%u -> [%pI6]:%u (proto %u reason %u cause %u)\n",
 			    s->flow_ip, ntohs(s->flow_ident), s->return_ip, ntohs(s->return_ident),
 			    s->protocol, s->reason, s->cause);
@@ -1123,7 +1166,7 @@ static void sfe_cm_sync_work(struct work_struct *work)
 static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 {
 	struct sfe_connection_create sic;
-	struct net_device *in, *src_dev, *dest_dev;
+	struct net_device *src_dev, *dest_dev;
 	struct net_device *src_dev_tmp = NULL, *dest_dev_tmp = NULL;
 	struct net_device *src_br_dev = NULL, *dest_br_dev = NULL;
 	enum ip_conntrack_info ctinfo;
@@ -1137,10 +1180,9 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	if (skb->sk)
 		return NF_ACCEPT;
 
-	in = dev_get_by_index(&init_net, skb->skb_iif);
-	if (!in)
+	/* Locally generated packets carry no input device; they are never offloaded. */
+	if (!skb->skb_iif)
 		return NF_ACCEPT;
-	dev_put(in);
 
 	ct = nf_ct_get(skb, &ctinfo);
 	if (unlikely(!ct))
@@ -1160,6 +1202,28 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	if (unlikely(nf_ct_is_dying(ct)))
 		return NF_ACCEPT;
 
+	/*
+	 * Leave the first sfe_cm_delay_pkts packets to the stack: proxies and DPI
+	 * get a window to claim the flow, and short lived flows stay out of the
+	 * connection table.  Cheapest exit, so it comes first.
+	 */
+	if (sfe_cm_delay_pkts && sfe_cm_get_pkt_count(ct) < sfe_cm_delay_pkts)
+		return NF_ACCEPT;
+
+	/* A refused flow is not examined again on every packet. */
+	if (unlikely(sfe_cm_no_accel_test(ct)))
+		return NF_ACCEPT;
+
+	/*
+	 * A packet mark the engine cannot reproduce means a netfilter rule matches
+	 * on it.  Decided here so a refused flow never pays for the device lookup.
+	 */
+	if (unlikely(!sfe_cm_refuse_all_shaped && skb->mark && skb->mark != ct->mark)) {
+		atomic64_inc(&sfe_cm_stat_refused);
+		sfe_cm_no_accel_add(ct);
+		return NF_ACCEPT;
+	}
+
 	struct nf_conn_help *help = nfct_help(ct);
 
 	if (unlikely(help)) {
@@ -1175,22 +1239,6 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 				strcmp(helper->name, "BCM-NAT6") != 0))
 			return NF_ACCEPT;
 	}
-
-
-	/*
-	 * A flow that was already refused is not examined again on every packet: the
-	 * decision depends on devices only, never on the packet.
-	 */
-	if (unlikely(sfe_cm_no_accel_test(ct)))
-		return NF_ACCEPT;
-
-	/*
-	 * Leave the first sfe_cm_delay_pkts packets to the stack: proxies and DPI
-	 * get a window to claim the flow, and short lived flows stay out of the
-	 * connection table.
-	 */
-	if (sfe_cm_delay_pkts && sfe_cm_get_pkt_count(ct) < sfe_cm_delay_pkts)
-		return NF_ACCEPT;
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 	reply_tuple = ct->tuplehash[IP_CT_DIR_REPLY].tuple;
@@ -1326,10 +1374,10 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	sic.dest_mtu = dest_dev->mtu;
 
 	if (likely(is_v4)) {
-		result = sfe_cm_v2_ipv4_create_rule(&sic);
+		result = sfe_cm_v2_ipv4_create_rule(&sic, skb, ctinfo);
 	} else {
 #ifdef SFE_SUPPORT_IPV6
-		result = sfe_cm_v2_ipv6_create_rule(&sic);
+		result = sfe_cm_v2_ipv6_create_rule(&sic, skb, ctinfo);
 #else
 		result = -EINVAL;
 #endif
