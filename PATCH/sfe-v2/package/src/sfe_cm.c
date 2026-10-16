@@ -932,6 +932,18 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 		return false;
 	}
 
+	/*
+	 * A point to point device has no usable L2 address: its PPPoE encapsulation is
+	 * handled through dev_fill_forward_path() above, and accelerating it with what
+	 * the neighbour holds (a zero MAC) sends every packet nowhere.
+	 */
+	if (unlikely(!mac_dev->addr_len || (mac_dev->flags & IFF_POINTOPOINT))) {
+		rcu_read_unlock();
+		neigh_release(neigh);
+		dst_release(dst);
+		return false;
+	}
+
 	memcpy(mac_addr, neigh->ha, ETH_ALEN);
 	dev_hold(mac_dev);
 	*dev = mac_dev;
@@ -1262,6 +1274,19 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	if (unlikely(sfe_cm_no_accel_test(ct)))
 		return NF_ACCEPT;
 
+	/*
+	 * A packet mark the engine cannot reproduce means a netfilter rule steers
+	 * this flow: the rule only carries ct->mark, so accelerating it would drop
+	 * the mark and with it policy routing, tproxy and qdisc classification.
+	 * Decided here so a refused flow never pays for the device lookup; with
+	 * refuse_all_shaped the stricter device check above already covered it.
+	 */
+	if (unlikely(!sfe_cm_refuse_all_shaped && skb->mark && skb->mark != ct->mark)) {
+		atomic64_inc(&sfe_cm_stat_refused);
+		sfe_cm_no_accel_add(ct);
+		return NF_ACCEPT;
+	}
+
 	struct nf_conn_help *help = nfct_help(ct);
 
 	if (unlikely(help)) {
@@ -1411,6 +1436,15 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	sic.src_mtu = src_dev->mtu;
 	sic.dest_mtu = dest_dev->mtu;
 
+	/*
+	 * A PPPoE session on top of the transmitting device carries the smaller MTU;
+	 * the engine sizes and fragments on what it is told here.
+	 */
+	if (sic.flow_is_pppoe && sic.flow_top_dev && sic.flow_top_dev->mtu < sic.src_mtu)
+		sic.src_mtu = sic.flow_top_dev->mtu;
+	if (sic.return_is_pppoe && sic.return_top_dev && sic.return_top_dev->mtu < sic.dest_mtu)
+		sic.dest_mtu = sic.return_top_dev->mtu;
+
 	if (likely(is_v4)) {
 		result = sfe_cm_v2_ipv4_create_rule(&sic, skb, ctinfo);
 	} else {
@@ -1421,11 +1455,11 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 #endif
 	}
 
-	if (unlikely(result == -EOPNOTSUPP)) {
+	if (likely(!result)) {
+		atomic64_inc(&sfe_cm_stat_created);
+	} else {
 		atomic64_inc(&sfe_cm_stat_refused);
 		sfe_cm_no_accel_add(ct);
-	} else if (likely(!result)) {
-		atomic64_inc(&sfe_cm_stat_created);
 	}
 
 	if (dest_br_dev)
@@ -1500,6 +1534,7 @@ static void sfe_cm_conntrack_destroy(unsigned int events, const struct nf_ct_eve
 	sfe_cm_no_accel_del(ct);
 
 	orig_tuple = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
+	memset(&sid, 0, sizeof(sid));
 	sid.protocol = orig_tuple.dst.protonum;
 
 	switch (sid.protocol) {
@@ -1587,17 +1622,23 @@ static struct nf_ct_event_notifier sfe_cm_conntrack_notifier = {
  *	Own the (single) conntrack event notifier slot, remembering its previous
  *	owner so its events can be forwarded.
  */
+static DEFINE_MUTEX(sfe_cm_conntrack_notifier_lock);
+
 static void sfe_cm_conntrack_notifier_reclaim(void)
 {
 	const struct nf_ct_event_notifier *cur;
 
+	mutex_lock(&sfe_cm_conntrack_notifier_lock);
+
 	cur = rcu_access_pointer(init_net.ct.nf_conntrack_event_cb);
 	if (cur == &sfe_cm_conntrack_notifier)
-		return;
+		goto out;
 
 	rcu_assign_pointer(sfe_cm_prev_notifier, cur);
 	nf_conntrack_unregister_notifier(&init_net);
 	nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
+out:
+	mutex_unlock(&sfe_cm_conntrack_notifier_lock);
 }
 
 /*
@@ -1608,8 +1649,10 @@ static void sfe_cm_conntrack_notifier_release(void)
 {
 	const struct nf_ct_event_notifier *prev;
 
+	mutex_lock(&sfe_cm_conntrack_notifier_lock);
+
 	if (rcu_access_pointer(init_net.ct.nf_conntrack_event_cb) != &sfe_cm_conntrack_notifier)
-		return;
+		goto out;
 
 	rcu_read_lock();
 	prev = rcu_dereference(sfe_cm_prev_notifier);
@@ -1618,6 +1661,8 @@ static void sfe_cm_conntrack_notifier_release(void)
 	nf_conntrack_unregister_notifier(&init_net);
 	if (prev)
 		nf_conntrack_register_notifier(&init_net, prev);
+out:
+	mutex_unlock(&sfe_cm_conntrack_notifier_lock);
 }
 #endif
 
@@ -1662,12 +1707,12 @@ static void sfe_cm_flush_dev(struct net_device *dev)
  *
  * Only the sync work touches the list, no locking is needed.
  */
-#define SFE_CM_SHAPED_DEV_MAX	16
+#define SFE_CM_SHAPED_DEV_MAX	64
 static int sfe_cm_shaped_devs[SFE_CM_SHAPED_DEV_MAX];
 
 static void sfe_cm_shaped_dev_scan(void)
 {
-	int seen[SFE_CM_SHAPED_DEV_MAX];
+	int seen[SFE_CM_SHAPED_DEV_MAX] = { 0 };
 	int nseen = 0;
 	int i, j;
 
@@ -1676,8 +1721,11 @@ static void sfe_cm_shaped_dev_scan(void)
 		struct net_device *dev;
 
 		for_each_netdev_rcu(&init_net, dev) {
-			if (nseen == SFE_CM_SHAPED_DEV_MAX)
+			if (nseen == SFE_CM_SHAPED_DEV_MAX) {
+				pr_warn_ratelimited("sfe_cm: more than %d traffic control devices, some accelerated flows are not revoked\n",
+						    SFE_CM_SHAPED_DEV_MAX);
 				break;
+			}
 
 			/*
 			 * Both directions matter: a bypassed ingress program on a
@@ -1804,6 +1852,10 @@ static int __init sfe_cm_init(void)
 					      sfe_cm_v2_ipv4_sync_many_callback, NULL);
 	if (!sfe_v4_ctx) {
 		pr_err("sfe_cm: failed to register with SFE v2 IPv4 engine\n");
+		if (sfe_cm_acct_prev >= 0)
+			init_net.ct.sysctl_acct = sfe_cm_acct_prev;
+		free_percpu(sfe_cm_no_accel);
+		sfe_cm_no_accel = NULL;
 		return -ENODEV;
 	}
 
@@ -1866,6 +1918,12 @@ exit_fail:
 	if (sfe_v6_ctx)
 		sfe_ipv6_notify_unregister();
 #endif
+	/* The module never ran: leave the accounting sysctl as we found it. */
+	if (sfe_cm_acct_prev >= 0)
+		init_net.ct.sysctl_acct = sfe_cm_acct_prev;
+
+	free_percpu(sfe_cm_no_accel);
+	sfe_cm_no_accel = NULL;
 	return result;
 }
 
@@ -1874,12 +1932,6 @@ static void __exit sfe_cm_exit(void)
 	struct sfe_cm *sc = &__sc;
 
 	pr_info("sfe_cm: unloading\n");
-
-	cancel_delayed_work_sync(&sfe_cm_sync[0].dwork);
-
-#ifdef SFE_SUPPORT_IPV6
-	cancel_delayed_work_sync(&sfe_cm_sync[1].dwork);
-#endif
 
 	nf_unregister_net_hooks(&init_net, sfe_cm_ops_post_routing, ARRAY_SIZE(sfe_cm_ops_post_routing));
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
@@ -1896,6 +1948,15 @@ static void __exit sfe_cm_exit(void)
 #ifdef SFE_SUPPORT_IPV6
 	if (sfe_v6_ctx)
 		sfe_ipv6_notify_unregister();
+#endif
+
+	/*
+	 * Both engines drained their work above; only now can a callback no
+	 * longer rearm the sync work.
+	 */
+	cancel_delayed_work_sync(&sfe_cm_sync[0].dwork);
+#ifdef SFE_SUPPORT_IPV6
+	cancel_delayed_work_sync(&sfe_cm_sync[1].dwork);
 #endif
 
 	/*
