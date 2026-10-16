@@ -1,20 +1,3 @@
-From: YAOF-1 <dev@localhost>
-Date: Thu, 1 Jan 1970 00:00:00 +0000
-Subject: [PATCH] nftables: add brcm fullconenat support
-
-Adds the brcmfullcone keyword to the masquerade statement so fw4 can emit
-"masquerade brcmfullcone", which sets the masquerade address register to a
-non-zero value that the kernel uses to enable the full-cone mapping.
-
-Regenerated against the nftables version OpenWrt pins (1.1.6).  The previous
-change was written against an older nftables and did not apply cleanly: its
-parser_bison.y and scanner.l hunks were rejected outright.
-
-Self-contained: it does not depend on the "fullcone" expression support that
-was dropped together with nft-fullcone (no %token FULLCONE, no NFT_NAT_FULLCONE).
-
-Signed-off-by: YAOF-1 <dev@localhost>
----
 --- a/include/linux/netfilter/nf_tables.h
 +++ b/include/linux/netfilter/nf_tables.h
 @@ -1489,12 +1489,16 @@
