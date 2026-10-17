@@ -1,50 +1,31 @@
-From: YAOF-1 <dev@localhost>
-Subject: [PATCH] netfilter: add BCM expectation-based full cone NAT
+From: QiuSimons <45143996+QiuSimons@users.noreply.github.com>
+Subject: [PATCH] netfilter: nat: add BCM expectation-based full-cone NAT support
 
-BCM full cone NAT is expressed with a wildcard-source conntrack expectation
-keyed on the external address and port: any peer that sends to that
-address/port gets a related connection translated to the internal endpoint.
-The expectation carries the BCM-NAT helper (BCM-NAT6 for IPv6).
+Add Broadcom expectation-based full-cone NAT support for IPv4 and IPv6.
 
-Userspace selects this path by attaching that helper to the connection with
-"ct helper set" in front of the masquerade statement, which is why the
-helpers are registered for name lookup in nf_nat_init().  The mapping itself
-is created from the masquerade path, because that is where the external port
-is chosen.
+Full-cone NAT is implemented via a wildcard-source conntrack expectation
+keyed on the external mapped address and port. Any incoming packet matching
+the external address and port creates a related connection translated to
+the internal endpoint.
 
-Files touched:
+Key characteristics:
+- Endpoint-Independent Mapping (RFC 4787 REQ-1) via nf_nat_src_mapping().
+- Port Preservation (RFC 4787 REQ-3) and Parity Preservation (RFC 4787 REQ-4).
+- Userspace attaches the BCM-NAT (IPv4) or BCM-NAT6 (IPv6) helper to the
+  connection using "ct helper set" prior to masquerade.
+- Full compatibility with Netfilter software flowtable offloading (IPS_FULLCONE).
+- Clean fallback to symmetric NAT when expectation tables are exhausted.
 
-  nf_nat_masquerade.c   external port selection (RFC 4787 REQ-1/3/4),
-                        expectation install, IPv4 and IPv6 entry points
-  nf_nat_core.c         nf_nat_src_mapping(), the endpoint-independent
-                        mapping lookup for REQ-1, and helper registration
-  nft_flow_offload.c    let full cone connections use the software
-                        flowtable (hardware offload stays excluded)
-  include/net/netfilter/nf_nat.h
-  include/uapi/linux/netfilter/nf_conntrack_common.h   IPS_FULLCONE bit
-
-The expectation expiry timer is set far beyond any conntrack lifetime and the
-mapping is torn down with its master connection instead: an offloaded
-connection never returns to the confirm path to re-arm a shorter timer.
-
-A connection that reuses an endpoint mapping therefore takes it over from an
-owner that is about to go away (dying, or not offloaded and thus on its own
-timer); an offloaded owner is exempt from the conntrack gc and keeps the
-mapping, so a flow that is still receiving never loses it.
-
-Signed-off-by: YAOF-1 <dev@localhost>
+Signed-off-by: QiuSimons <45143996+QiuSimons@users.noreply.github.com>
 ---
 
 --- a/include/net/netfilter/nf_nat.h
 +++ b/include/net/netfilter/nf_nat.h
-@@ -35,11 +35,20 @@
+@@ -35,11 +35,17 @@
  #endif
  };
  
-+/* The source mapping NAT already has for this internal endpoint, if any.  The
-+ * caller has to commit the returned address/port as a narrowed range, since the
-+ * kernel only reuses a mapping that its range contains.
-+ */
++/* Lookup existing source mapping for an internal endpoint (RFC 4787 REQ-1) */
 +bool nf_nat_src_mapping(struct net *net, const struct nf_conntrack_zone *zone,
 +			const struct nf_conntrack_tuple *orig,
 +			union nf_inet_addr *addr, __be16 *port);
@@ -58,7 +39,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  extern unsigned int nf_nat_alloc_null_binding(struct nf_conn *ct,
  					      unsigned int hooknum);
  
-@@ -116,4 +125,13 @@
+@@ -116,4 +122,13 @@
  	else
  		return ct->status & IPS_DST_NAT_DONE;
  }
@@ -74,14 +55,11 @@ Signed-off-by: YAOF-1 <dev@localhost>
  #endif
 --- a/include/uapi/linux/netfilter/nf_conntrack_common.h
 +++ b/include/uapi/linux/netfilter/nf_conntrack_common.h
-@@ -118,15 +118,22 @@
+@@ -118,15 +118,19 @@
  	IPS_HW_OFFLOAD_BIT = 15,
  	IPS_HW_OFFLOAD = (1 << IPS_HW_OFFLOAD_BIT),
  
-+	/* The connection was set up by the full-cone masquerade path.  It keeps
-+	 * that path from running again on retransmits, and marks the connection
-+	 * as eligible for software flow offload.
-+	 */
++	/* Full-cone NAT connection; eligible for software flowtable offload */
 +	IPS_FULLCONE_BIT = 16,
 +	IPS_FULLCONE = (1 << IPS_FULLCONE_BIT),
 +
@@ -101,28 +79,25 @@ Signed-off-by: YAOF-1 <dev@localhost>
  /* Connection tracking event types */
 --- a/net/netfilter/nf_nat_core.c
 +++ b/net/netfilter/nf_nat_core.c
-@@ -493,6 +493,59 @@
+@@ -493,6 +493,53 @@
  	return 0;
  }
  
 +/**
-+ * nf_nat_src_mapping - the source mapping NAT already has for an endpoint
-+ * @net: network namespace of the connection
-+ * @zone: conntrack zone of the connection
-+ * @orig: original tuple of the connection being set up
-+ * @addr: output, the mapped source address of a live mapping
-+ * @port: output, the mapped source port of a live mapping
++ * nf_nat_src_mapping - lookup existing source mapping for an endpoint
++ * @net: network namespace
++ * @zone: conntrack zone
++ * @orig: original tuple of the connection
++ * @addr: destination pointer for mapped source address
++ * @port: destination pointer for mapped source port
 + *
-+ * Walks nf_nat_bysource, so a new connection from an already-mapped endpoint
-+ * keeps that port (RFC 4787 REQ-1).  The caller has to commit the pair
-+ * (@addr, @port) as a narrowed range, because that is the only way the port
-+ * survives get_unique_tuple()'s range checks.  Returns true when a mapping was
-+ * found.
++ * Walks nf_nat_bysource to preserve endpoint-independent mapping (RFC 4787 REQ-1).
++ * Returns true if an active mapping is found.
 + */
 +bool nf_nat_src_mapping(struct net *net,
-+			       const struct nf_conntrack_zone *zone,
-+			       const struct nf_conntrack_tuple *orig,
-+			       union nf_inet_addr *addr, __be16 *port)
++			const struct nf_conntrack_zone *zone,
++			const struct nf_conntrack_tuple *orig,
++			union nf_inet_addr *addr, __be16 *port)
 +{
 +	unsigned int h;
 +	const struct nf_conn *ct;
@@ -135,9 +110,6 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +
 +	rcu_read_lock();
 +	hlist_for_each_entry_rcu(ct, &nf_nat_bysource[h], nat_bysource) {
-+		/* same_src() does not compare l3num; a bucket collision could
-+		 * otherwise match a v4 lookup against an aliasing v6 address.
-+		 */
 +		if (nf_ct_is_dying(ct) ||
 +		    nf_ct_l3num(ct) != orig->src.l3num ||
 +		    !same_src(ct, orig) ||
@@ -161,7 +133,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  /* For [FUTURE] fragmentation handling, we want the least-used
   * src-ip/dst-ip/proto triple.  Fairness doesn't come into it.  Thus
   * if the range specifies 1.2.3.4 ports 10000-10005 and 1.2.3.5 ports
-@@ -1358,6 +1411,9 @@
+@@ -1358,6 +1405,9 @@
  		kvfree(nf_nat_bysource);
  	}
  
@@ -171,7 +143,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  	return ret;
  }
  
-@@ -1367,6 +1423,8 @@
+@@ -1367,6 +1417,8 @@
  
  	nf_ct_iterate_destroy(nf_nat_proto_clean, &clean);
  
@@ -192,7 +164,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  
  struct masq_dev_work {
  	struct work_struct work;
-@@ -24,6 +27,466 @@
+@@ -24,6 +27,511 @@
  static unsigned int masq_refcnt __read_mostly;
  static atomic_t masq_worker_count __read_mostly;
  
@@ -200,6 +172,8 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +                          struct nf_conntrack_expect *exp)
 +{
 +       struct nf_nat_range2 range;
++
++       memset(&range, 0, sizeof(range));
 +
 +       /* This must be a fresh one. */
 +       BUG_ON(ct->status & IPS_NAT_DONE_MASK);
@@ -215,6 +189,12 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +       range.min_proto = range.max_proto = exp->saved_proto;
 +       range.min_addr = range.max_addr = exp->saved_addr;
 +       nf_nat_setup_info(ct, &range, NF_NAT_MANIP_DST);
++
++       /* The related connection is fully set up and carries the helper,
++        * so the software flowtable may forward it; hardware offload stays
++        * excluded.
++        */
++       set_bit(IPS_FULLCONE_BIT, &ct->status);
 +}
 +
 +/* Build the expectation-table key for an external address and port. */
@@ -278,6 +258,12 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +	if (!(ct->status & IPS_FULLCONE))
 +		return NF_ACCEPT;
 +
++	/* A connection created from the expectation is complete: it must not
++	 * install a second expectation aimed at its peer.
++	 */
++	if (test_bit(IPS_EXPECTED_BIT, &ct->status))
++		return NF_ACCEPT;
++
 +	dir = CTINFO2DIR(ctinfo);
 +	if (dir != IP_CT_DIR_ORIGINAL)
 +		return NF_ACCEPT;
@@ -317,7 +303,12 @@ Signed-off-by: YAOF-1 <dev@localhost>
 + * connection that owns it, and nf_ct_remove_expectations() frees it.
 + */
 +static struct nf_conntrack_expect_policy bcm_nat_exp_policy __read_mostly = {
-+	.max_expected	= 1000,
++	/* One mapping per connection: the masquerade path registers it once and
++	 * bcm_nat_help() never registers a second one for the same conntrack.
++	 * NF_CT_EXPECT_MAX_CNT is 255 and nf_conntrack_helper_register() refuses
++	 * any policy above it.
++	 */
++	.max_expected	= 1,
 +	.timeout	= 86400,
 +};
 +
@@ -500,13 +491,15 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +	const struct nf_conntrack_tuple *orig =
 +		&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
 +	u_int16_t srcport = ntohs(orig->src.u.udp.port);
-+	u_int16_t minport, maxport, minp, maxp, parity, start, span;
++	u_int16_t minport, maxport, minp, maxp, parity;
 +	struct nf_conntrack_tuple tuple;
 +	union nf_inet_addr reuse_addr;
 +	__be16 reuse_port = 0;
 +	unsigned int i, n = 0;
 +	bool found = false;
 +	__be16 cands[BCM_NAT_PORT_PROBES];
++
++	memset(newrange, 0, sizeof(*newrange));
 +
 +	/* An endpoint that already has a mapping keeps its port (RFC 4787
 +	 * REQ-1).  It has to be committed as a narrowed range: the range the
@@ -516,79 +509,103 @@ Signed-off-by: YAOF-1 <dev@localhost>
 +	if (nf_nat_src_mapping(nf_ct_net(ct), nf_ct_zone(ct), orig, &reuse_addr,
 +			       &reuse_port) &&
 +	    reuse_port != 0) {
-+		int state;
++		bool same_addr = (l3num == AF_INET6) ?
++			ipv6_addr_equal(&reuse_addr.in6,
++					(const struct in6_addr *)addr) :
++			reuse_addr.ip == *(const __be32 *)addr;
 +
-+		bcm_nat_expect_tuple(&tuple, l3num, &reuse_addr, reuse_port);
-+		rcu_read_lock();
-+		state = bcm_nat_expect_state(ct, orig, &tuple);
-+		rcu_read_unlock();
-+
-+		/* A port owned by another endpoint must not be reused. */
-+		if (state == 2)
-+			return NF_DROP;
-+
-+		/* state 1: a live expectation covers this endpoint; keep it
-+		 * unless its owner is about to go away.
-+		 * state 0: the expectation died with the conntrack that owned it
-+		 * (nf_ct_remove_expectations() drops it with its master), so the
-+		 * port is bound but unreachable and has to be registered again.
++		/* The endpoint has a mapping, but not necessarily on the address
++		 * this packet leaves through: with multiple WANs or a changed
++		 * address, reusing it would put a foreign source address on the
++		 * wire.
 +		 */
-+		if (state == 1)
-+			*need_expect = bcm_nat_takeover(ct, &tuple);
-+		else
-+			*need_expect = true;
++		if (same_addr) {
++			int state;
 +
-+		minport = maxport = reuse_port;
-+		if (l3num == AF_INET6)
-+			newrange->min_addr.in6 = newrange->max_addr.in6 =
-+				reuse_addr.in6;
-+		else
-+			newrange->min_addr.ip = newrange->max_addr.ip =
-+				reuse_addr.ip;
-+		newrange->flags = range->flags | NF_NAT_RANGE_MAP_IPS |
-+			NF_NAT_RANGE_PROTO_SPECIFIED;
-+		newrange->min_proto.udp.port =
-+			newrange->max_proto.udp.port = reuse_port;
-+		return NF_ACCEPT;
++			bcm_nat_expect_tuple(&tuple, l3num, &reuse_addr, reuse_port);
++			rcu_read_lock();
++			state = bcm_nat_expect_state(ct, orig, &tuple);
++			rcu_read_unlock();
++
++			/* A port owned by another endpoint must not be reused. */
++			if (state == 2)
++				return NF_DROP;
++
++			/* state 1: a live expectation covers this endpoint; keep it
++			 * unless its owner is about to go away.
++			 * state 0: the expectation died with the conntrack that owned it
++			 * (nf_ct_remove_expectations() drops it with its master), so the
++			 * port is bound but unreachable and has to be registered again.
++			 */
++			if (state == 1)
++				*need_expect = bcm_nat_takeover(ct, &tuple);
++			else
++				*need_expect = true;
++
++			minport = maxport = reuse_port;
++			if (l3num == AF_INET6)
++				newrange->min_addr.in6 = newrange->max_addr.in6 =
++					reuse_addr.in6;
++			else
++				newrange->min_addr.ip = newrange->max_addr.ip =
++					reuse_addr.ip;
++			newrange->flags = range->flags | NF_NAT_RANGE_MAP_IPS |
++				NF_NAT_RANGE_PROTO_SPECIFIED;
++			newrange->min_proto.udp.port =
++				newrange->max_proto.udp.port = reuse_port;
++			return NF_ACCEPT;
++		}
 +	}
 +
-+	minport = range->min_proto.all == 0 ? orig->src.u.udp.port :
-+		range->min_proto.all;
-+	maxport = range->max_proto.all == 0 ? htons(65535) :
-+		range->max_proto.all;
++	minport = range->min_proto.all;
++	maxport = range->max_proto.all;
++	if (minport == 0) {
++		/* No range in the rule: follow the convention the kernel uses for
++		 * a source rewrite.  Starting at the internal port would leave
++		 * only the few ports above a high one available.
++		 */
++		if (srcport < 512) {
++			minport = htons(1);
++			maxport = htons(511);
++		} else if (srcport < 1024) {
++			minport = htons(600);
++			maxport = htons(1023);
++		} else {
++			minport = htons(1024);
++			maxport = htons(65535);
++		}
++	} else if (maxport == 0) {
++		maxport = htons(65535);
++	}
 +	minp = ntohs(minport);
 +	maxp = ntohs(maxport);
 +	parity = srcport & 1;
 +
 +	if (minp <= maxp) {
-+		span = (u_int16_t)(maxp - minp + 1);
-+		/* keep the source port parity (RFC 4787 REQ-4) */
-+		start = minp + (get_random_u16() % span);
-+		start |= (u_int16_t)(parity ^ (start & 1));
-+		for (i = 0; i < BCM_NAT_PORT_PROBES; i++) {
-+			u_int16_t c;
++		/* The source port parity has to be kept (RFC 4787 REQ-4), so the
++		 * candidates are one arithmetic sequence with a step of two.
++		 */
++		u32 first = minp + ((parity ^ (minp & 1)) ? 1 : 0);
++		u32 cnt = (first <= maxp) ? (maxp - first) / 2 + 1 : 0;
++		u32 idx = cnt ? get_random_u16() % cnt : 0;
++		bool have_src = false;
 +
-+			if (i & 1) {
-+				if (start - (i >> 1) < minp)
-+					continue;
-+				c = start - (i >> 1);
-+			} else {
-+				c = minp + ((start - minp + (i >> 1)) % span);
-+			}
-+			if ((c & 1) != parity)
-+				continue;
-+			cands[n] = htons(c);
-+			if (++n == BCM_NAT_PORT_PROBES)
-+				break;
-+		}
-+		/* internal port first: port preservation */
++		/* internal port first: port preservation (RFC 4787 REQ-3) */
 +		if (srcport >= minp && srcport <= maxp &&
-+		    (srcport & 1) == parity &&
-+		    n < BCM_NAT_PORT_PROBES) {
-+			for (i = n; i > 0; i--)
-+				cands[i] = cands[i - 1];
-+			cands[0] = htons(srcport);
-+			n++;
++		    (srcport & 1) == parity) {
++			cands[n++] = htons(srcport);
++			have_src = true;
++		}
++
++		for (i = 0; i < cnt && n < BCM_NAT_PORT_PROBES; i++) {
++			u32 d = (i + 1) >> 1;
++			u32 j = (i & 1) ? (idx + cnt - d) % cnt :
++					 (idx + d) % cnt;
++			u_int16_t c = first + 2 * j;
++
++			if (have_src && c == srcport)
++				continue;
++			cands[n++] = htons(c);
 +		}
 +	}
 +
@@ -659,7 +676,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  unsigned int
  nf_nat_masquerade_ipv4(struct sk_buff *skb, unsigned int hooknum,
  		       const struct nf_nat_range2 *range,
-@@ -61,6 +524,38 @@
+@@ -61,6 +569,38 @@
  	if (nat)
  		nat->masq_index = out->ifindex;
  
@@ -698,7 +715,7 @@ Signed-off-by: YAOF-1 <dev@localhost>
  	/* Transfer from original range. */
  	memset(&newrange.min_addr, 0, sizeof(newrange.min_addr));
  	memset(&newrange.max_addr, 0, sizeof(newrange.max_addr));
-@@ -259,6 +754,40 @@
+@@ -259,6 +799,40 @@
  	if (nat)
  		nat->masq_index = out->ifindex;
  
@@ -741,19 +758,13 @@ Signed-off-by: YAOF-1 <dev@localhost>
  	newrange.max_addr.in6	= src;
 --- a/net/netfilter/nft_flow_offload.c
 +++ b/net/netfilter/nft_flow_offload.c
-@@ -353,8 +353,19 @@
+@@ -353,8 +353,13 @@
  		goto out;
  	}
  
 -	if (nf_ct_ext_exist(ct, NF_CT_EXT_HELPER) ||
 -	    ct->status & (IPS_SEQ_ADJUST | IPS_NAT_CLASH))
-+	/*
-+	 * A full-cone connection carries a helper but its mapping is complete in
-+	 * conntrack, so software offload may take it over - IPS_FULLCONE is only
-+	 * set together with a registered expectation.  Hardware offload may not:
-+	 * it would punt packets without conntrack resolving the expectation.
-+	 * Every other helper-carrying connection keeps the original behaviour.
-+	 */
++	/* Allow software flowtable offload for full-cone NAT connections */
 +	if (nf_ct_ext_exist(ct, NF_CT_EXT_HELPER) &&
 +	    (!(ct->status & IPS_FULLCONE) ||
 +	     nf_flowtable_hw_offload(&priv->flowtable->data)))
