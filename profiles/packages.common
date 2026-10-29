@@ -1,0 +1,69 @@
+# UI
+luci
+luci-mod-dashboard
+luci-theme-aurora
+addition-trans-zh
+
+# Translations
+luci-i18n-base-zh-cn
+luci-i18n-dashboard-zh-cn
+luci-i18n-firewall-zh-cn
+luci-i18n-package-manager-zh-cn
+luci-i18n-homeproxy-zh-cn
+luci-i18n-nikki-zh-cn
+luci-i18n-honk-zh-cn
+luci-i18n-dae-zh-cn
+luci-i18n-flowcone-zh-cn
+luci-i18n-sqm-zh-cn
+luci-i18n-natmapt-zh-cn
+luci-i18n-bandix-zh-cn
+luci-i18n-arpbind-zh-cn
+luci-i18n-ap-modem-zh-cn
+luci-i18n-zerotier-zh-cn
+luci-i18n-ddns-zh-cn
+luci-i18n-upnp-zh-cn
+luci-i18n-3cat-zh-cn
+luci-i18n-airconnect-zh-cn
+luci-i18n-filemanager-zh-cn
+
+# Proxy & eBPF
+luci-app-homeproxy
+luci-app-nikki
+luci-app-honk
+luci-app-dae
+vmlinux-btf
+luci-app-flowcone
+
+# Network & Routing
+luci-app-sqm
+luci-app-natmapt
+luci-app-bandix
+luci-app-arpbind
+luci-app-ap-modem
+
+# VPN & Services
+luci-proto-wireguard
+qrencode
+luci-app-zerotier
+luci-app-ddns
+luci-app-upnp
+luci-app-3cat
+luci-app-airconnect
+
+# System & Filesystem
+ethtool
+kmod-fs-f2fs
+kmod-tcp-bbr
+luci-app-filemanager
+
+# USB Tethering
+kmod-usb-net-rndis
+kmod-usb-net-ipheth
+usbmuxd
+kmod-usb-net-cdc-ether
+
+# Base Packages
+-dnsmasq
+dnsmasq-full
+-luci-app-attendedsysupgrade
+-attendedsysupgrade-common
