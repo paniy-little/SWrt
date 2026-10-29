@@ -2,6 +2,9 @@
 luci
 luci-mod-dashboard
 luci-theme-aurora
+luci-theme-argon
+luci-theme-graphite
+luci-theme-footstrap
 addition-trans-zh
 
 # Translations
@@ -9,6 +12,8 @@ luci-i18n-base-zh-cn
 luci-i18n-dashboard-zh-cn
 luci-i18n-firewall-zh-cn
 luci-i18n-package-manager-zh-cn
+luci-i18n-argon-config-zh-cn
+luci-i18n-graphite-zh-cn
 luci-i18n-homeproxy-zh-cn
 luci-i18n-nikki-zh-cn
 luci-i18n-honk-zh-cn
@@ -25,6 +30,7 @@ luci-i18n-upnp-zh-cn
 luci-i18n-3cat-zh-cn
 luci-i18n-airconnect-zh-cn
 luci-i18n-filemanager-zh-cn
+luci-i18n-partexp-zh-cn
 
 # Proxy & eBPF
 luci-app-homeproxy
@@ -46,6 +52,7 @@ luci-proto-wireguard
 qrencode
 luci-app-zerotier
 luci-app-ddns
+ddns-scripts-cloudflare
 luci-app-upnp
 luci-app-3cat
 luci-app-airconnect
@@ -54,7 +61,9 @@ luci-app-airconnect
 ethtool
 kmod-fs-f2fs
 kmod-tcp-bbr
+zram-swap
 luci-app-filemanager
+luci-app-partexp
 
 # USB Tethering
 kmod-usb-net-rndis
