@@ -18,6 +18,8 @@
 
 <h1 align="center">请勿用于商业用途!!!</h1>
 
+> **构建迁移说明（2026-11-20）**：本仓库的 GitHub Actions 已全部停用，不再在此构建或发布固件。后续构建与发版统一在 [hello-yunshu/YunWrt](https://github.com/hello-yunshu/YunWrt) 进行；本仓库仅保留源码与历史 Release 供查阅。
+
 ### 特性
 
 - 基于 OpenWrt 官方 ImageBuilder 与 [OpenWrt-Add](https://github.com/QiuSimons/OpenWrt-Add) 预编译 APK 签名源组装，默认管理地址 192.168.1.1
