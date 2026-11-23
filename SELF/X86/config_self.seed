@@ -108,6 +108,13 @@ CONFIG_LUCI_LANG_zh_Hans=y
 # CONFIG_LUCI_CSSTIDY is not set
 # CONFIG_LUCI_JSMIN is not set
 CONFIG_PACKAGE_luci-nginx=y
+CONFIG_PACKAGE_nginx-mod-luci=y
+CONFIG_PACKAGE_nginx-mod-ubus=y
+CONFIG_PACKAGE_uwsgi=y
+CONFIG_PACKAGE_uwsgi-cgi-plugin=y
+CONFIG_PACKAGE_uwsgi-luci-support=y
+# CONFIG_PACKAGE_uhttpd is not set
+# CONFIG_PACKAGE_uhttpd-mod-ubus is not set
 CONFIG_NGINX_HTTP_QUIC=y
 CONFIG_NGINX_STUB_STATUS=y
 CONFIG_NGINX_HTTP_REAL_IP=y
