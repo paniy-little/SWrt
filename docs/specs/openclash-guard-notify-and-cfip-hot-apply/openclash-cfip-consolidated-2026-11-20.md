@@ -210,7 +210,7 @@ PUT 超时、拒绝或回读不一致时，先检查内核实际加载情况及�
 ## 7. 可复制的 Goal 提示词
 
 ```text
-在 /Users/yunshu/Documents/GitHub 下完成 CFI 与 UPnP 的按能力热应用改造和验收。以 SWrt/docs/specs/openclash-guard-notify-and-cfip-hot-apply/openclash-cfip-consolidated-2026-11-20.md 的 §3 和 §6 为执行合同，§5 为历史进度。实现仓库是 luci-app-cloudflare-ip、luci-app-upnp-nat-relay，dns-guard 子任务涉及 YunWrt。保留现有用户改动及 spec.md、tasks.md 历史快照。
+在 /Users/user/Documents/GitHub 下完成 CFI 与 UPnP 的按能力热应用改造和验收。以 SWrt/docs/specs/openclash-guard-notify-and-cfip-hot-apply/openclash-cfip-consolidated-2026-11-20.md 的 §3 和 §6 为执行合同，§5 为历史进度。实现仓库是 luci-app-cloudflare-ip、luci-app-upnp-nat-relay，dns-guard 子任务涉及 YunWrt。保留现有用户改动及 spec.md、tasks.md 历史快照。
 
 先证实并落地 CFI OpenClash file provider 原位刷新，用已验证的候选 IP 单独验收应用，再验证全流程在线测速和 dns-guard。PassWall 与 HomeProxy 分别按版本、内核、节点角色或运行模式实测。UPnP 分开验收 relay 自身热更新和代理端口绕行规则的运行态生效，覆盖 OpenClash、PassWall、HomeProxy 的可验证组合。
 

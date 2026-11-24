@@ -1,6 +1,6 @@
 # YunWrt 对上游 YAOF / OpenWrt ImageBuilder 的耦合审计
 
-范围：`/Users/yunshu/Documents/GitHub/YunWrt`（main @ `fc9d141`）
+范围：`/Users/user/Documents/GitHub/YunWrt`（main @ `fc9d141`）
 方法：只读代码与文件；「实测」= 能在仓库里直接验证的事实，「推导」= 需要真跑一次构建才能确认。
 本文件只做分析，未改任何构建逻辑，未提交代码。
 
